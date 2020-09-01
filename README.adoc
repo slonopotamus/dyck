@@ -1,0 +1,45 @@
+= {project-name}
+Marat Radchenko <marat@slonopotamus.org>
+:project-name: Dyck
+:project-handle: dyck
+:slug: slonopotamus/{project-handle}
+:uri-project: https://github.com/{slug}
+:uri-ci: {uri-project}/actions?query=branch%3Amaster
+:uri-gem: https://rubygems.org/gems/{project-handle}
+
+image:https://img.shields.io/gem/v/{project-handle}.svg[Latest Release,link={uri-gem}]
+image:{uri-project}/workflows/CI/badge.svg?branch=master[Build Status,link={uri-ci}]
+
+{project-handle} is a Mobi parser/generator library written in Ruby.
+
+== Installation
+
+Add this line to your application's Gemfile:
+
+[source,ruby]
+----
+gem 'dyck'
+----
+
+And then execute:
+
+[source,shell script]
+----
+$ bundle install
+----
+
+Or install it yourself as:
+
+[source,shell script]
+----
+$ gem install dyck
+----
+
+== Usage
+
+TODO
+
+== Development
+
+After checking out the repo, run `bundle install` to install dependencies.
+Then, run `bundle exec rake spec` to run the tests.

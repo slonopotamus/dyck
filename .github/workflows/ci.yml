@@ -1,0 +1,33 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 2.7
+      - name: Build
+        run: bundle install --jobs 4 --retry 3
+      - name: Lint
+        run: bundle exec rake lint
+  test:
+    strategy:
+      matrix:
+        ruby: [jruby, 2.4, 2.5, 2.6, 2.7]
+        platform: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+      - name: Build
+        run: bundle install --jobs 4 --retry 3
+      - name: Test
+        run: bundle exec rake spec
