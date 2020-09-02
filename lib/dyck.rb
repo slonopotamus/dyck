@@ -94,8 +94,8 @@ module Dyck
           mod_num: io.read(4).unpack1('N'),
           appinfo_offset: io.read(4).unpack1('N'),
           sortinfo_offset: io.read(4).unpack1('N'),
-          type: io.read(4).encode('UTF-8'),
-          creator: io.read(4).encode('UTF-8'),
+          type: io.read(4).unpack1('Z*').encode('UTF-8'),
+          creator: io.read(4).unpack1('Z*').encode('UTF-8'),
           uid: io.read(4).unpack1('N'),
           next_rec: io.read(4).unpack1('N'),
           rec_count: io.read(2).unpack1('n')
@@ -125,8 +125,8 @@ module Dyck
       io.write([@mod_num].pack('N'))
       io.write([@appinfo_offset].pack('N'))
       io.write([@sortinfo_offset].pack('N'))
-      io.write(@type.encode('ASCII'))
-      io.write(@creator.encode('ASCII'))
+      io.write(@type.encode('ASCII')[0..3].rjust(4, "\0"))
+      io.write(@creator.encode('ASCII')[0..3].rjust(4, "\0"))
       io.write([@uid].pack('N'))
       io.write([@next_rec].pack('N'))
       io.write([@rec_count].pack('n'))
