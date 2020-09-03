@@ -61,6 +61,15 @@ RSpec.shared_examples 'sample book' do # rubocop:disable Metrics/BlockLength
     expect(subject.records[42].uid).to eq(86)
     expect(subject.records[42].body).to start_with('w:0002?mime=text/css);/* @page is for EPUB2 only */')
   end
+
+  it 'has kf7' do
+    expect(subject.kf7).not_to be_nil
+    expect(subject.kf7.compression).to eq(Dyck::MobiData::NO_COMPRESSION)
+    expect(subject.kf7.encryption).to eq(Dyck::MobiData::NO_ENCRYPTION)
+    expect(subject.kf7.mobi_type).to eq(2)
+    expect(subject.kf7.text_encoding).to eq(Dyck::MobiData::TEXT_ENCODING_UTF8)
+    expect(subject.kf7.version).to eq(6)
+  end
 end
 
 describe 'existing file' do

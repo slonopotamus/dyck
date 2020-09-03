@@ -3,7 +3,7 @@
 require 'dyck/version'
 
 module Dyck
-  # A single record within Mobi file
+  # A single data record within Mobi file
   class MobiRecord
     attr_accessor(:attributes)
     attr_accessor(:uid)
@@ -16,12 +16,51 @@ module Dyck
     end
   end
 
+  # A single KF7/KF8 metadata
+  class MobiData
+    NO_COMPRESSION = 1
+    PALMDOC_COMPRESSION = 2
+    HUFF_COMPRESSION = 17_480
+    SUPPORTED_COMPRESSIONS = [NO_COMPRESSION].freeze
+    attr_accessor(:compression)
+
+    NO_ENCRYPTION = 0
+    OLD_ENCRYPTION = 1
+    MOBI_ENCRYPTION = 2
+    SUPPORTED_ENCRYPTIONS = [NO_ENCRYPTION].freeze
+    attr_accessor(:encryption)
+
+    attr_accessor(:mobi_type)
+
+    TEXT_ENCODING_CP1252 = 1252
+    TEXT_ENCODING_UTF8 = 65_001
+    SUPPORTED_TEXT_ENCODINGS = [TEXT_ENCODING_UTF8].freeze
+    attr_accessor(:text_encoding)
+
+    attr_accessor(:version)
+
+    def initialize(
+      compression: NO_COMPRESSION,
+      encryption: NO_ENCRYPTION,
+      mobi_type: 2,
+      text_encoding: TEXT_ENCODING_UTF8,
+      version: 6
+    )
+      @compression = compression
+      @encryption = encryption
+      @mobi_type = mobi_type
+      @text_encoding = text_encoding
+      @version = version
+    end
+  end
+
   # Represents a single Mobi file
   class Mobi # rubocop:disable Metrics/ClassLength
     # Max name length, including null terminating character
     NAME_LEN = 32
     TYPE_LEN = 4
     CREATOR_LEN = 4
+    MOBI_MAGIC = 'MOBI'
 
     # @return [String]
     attr_accessor(:name)
@@ -44,6 +83,8 @@ module Dyck
     attr_accessor(:next_rec)
     # @return [Array<Dyck::MobiRecord>]
     attr_reader(:records)
+    # @return [Dyck::MobiData]
+    attr_accessor(:kf7)
 
     # @param name [String]
     # @param ctime [Time]
@@ -60,12 +101,13 @@ module Dyck
       appinfo_offset: 0,
       sortinfo_offset: 0,
       type: 'BOOK',
-      creator: 'MOBI',
+      creator: MOBI_MAGIC,
       uid: 0,
       next_rec: 0,
       records: []
     )
-      raise ArgumentError, %(Unsupported file type: #{type}) if type != 'BOOK'
+      raise ArgumentError, %(Unsupported type: #{type}) if type != 'BOOK'
+      raise ArgumentError, %(Unsupported creator: #{type}) if creator != MOBI_MAGIC
 
       @name = name
       @attributes = attributes
@@ -81,6 +123,7 @@ module Dyck
       @uid = uid
       @next_rec = next_rec
       @records = records
+      @kf7 = MobiData.new
     end
 
     class << self
@@ -117,6 +160,8 @@ module Dyck
         )
 
         read_records(io, mobi)
+        @kf7 = read_record0(mobi.records[0]) unless mobi.records.empty?
+        mobi
       end
 
       def read_records(io, mobi) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
@@ -136,7 +181,54 @@ module Dyck
           end_offset = index < record_offsets.size - 1 ? record_offsets[index + 1] : eof
           record.body = io.read(end_offset - record_offsets[index])
         end
-        mobi
+      end
+
+      # @param record [Dyck::MobiRecord]
+      # @return [Dyck::MobiData]
+      def read_record0(record) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+        raise ArgumentError, 'Expected at least 16 bytes in record0' if record.body.bytesize < 16
+
+        io = StringIO.new(record.body)
+        io.binmode
+
+        result = MobiData.new
+        result.compression = io.read(2).unpack1('n')
+        unless MobiData::SUPPORTED_COMPRESSIONS.include? result.compression
+          raise ArgumentError, %(Unsupported compression: #{result.compression})
+        end
+
+        io.read(2) # unused 2 bytes, zeroes
+        _text_length = io.read(4).unpack1('N')
+        _text_record_count = io.read(2).unpack1('n')
+        _text_record_size = io.read(2).unpack1('n')
+
+        result.encryption = io.read(2).unpack1('n')
+        unless MobiData::SUPPORTED_ENCRYPTIONS.include? result.encryption
+          raise ArgumentError, %(Unsupported encryption: #{result.encryption})
+        end
+
+        _unknown1 = io.read(2).unpack1('n')
+
+        # Mobi header starts here
+
+        magic = io.read(4)
+        raise ArgumentError, %(Unsupported magic: #{magic}) if magic != MOBI_MAGIC
+
+        header_length = io.read(4).unpack1('N')
+        header = StringIO.new(io.read(header_length - 8))
+        result.mobi_type = header.read(4).unpack1('N')
+
+        result.text_encoding = header.read(4).unpack1('N')
+        unless MobiData::SUPPORTED_TEXT_ENCODINGS.include?(result.text_encoding)
+          raise ArgumentError, %(Unsupported text encoding: #{result.text_encoding})
+        end
+
+        _uid = header.read(4).unpack1('N')
+        result.version = header.read(4).unpack1('N')
+
+        # ignore all the rest header fields for now
+
+        result
       end
     end
 
@@ -153,6 +245,7 @@ module Dyck
     private
 
     def write_io(io) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+      io.binmode
       io.write(@name.encode('ASCII')[0..NAME_LEN - 2].ljust(NAME_LEN, "\0"))
       io.write([@attributes].pack('n'))
       io.write([@version].pack('n'))
@@ -166,7 +259,39 @@ module Dyck
       io.write(@creator.encode('ASCII')[0..CREATOR_LEN - 1].ljust(CREATOR_LEN, "\0"))
       io.write([@uid].pack('N'))
       io.write([@next_rec].pack('N'))
+
+      @records << MobiRecord.new if @records.empty?
+      update_record0(@kf7, @records[0])
       write_records(io)
+    end
+
+    # @param mobi_data [Dyck::MobiData]
+    # @param record [Dyck::MobiRecord]
+    def update_record0(mobi_data, record) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+      io = StringIO.new
+      io.binmode
+      io.write([mobi_data.compression].pack('n'))
+      io.write("\0\0")
+      text_length = 0 # TODO
+      io.write([text_length].pack('N'))
+      text_record_count = 0 # TODO
+      io.write([text_record_count].pack('n'))
+      text_record_size = 4096
+      io.write([text_record_size].pack('n'))
+      io.write([mobi_data.encryption].pack('n'))
+      unknown1 = 0
+      io.write([unknown1].pack('n'))
+
+      header_length = 24
+      io.write(MOBI_MAGIC)
+      io.write([header_length].pack('N'))
+      io.write([mobi_data.mobi_type].pack('N'))
+      io.write([mobi_data.text_encoding].pack('N'))
+      uid = 0
+      io.write([uid].pack('N'))
+      io.write([mobi_data.version].pack('N'))
+
+      record.body = io.string
     end
 
     def write_records(io) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
