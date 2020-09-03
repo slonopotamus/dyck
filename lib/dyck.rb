@@ -3,10 +3,25 @@
 require 'dyck/version'
 
 module Dyck
+  # A single record within Mobi file
+  class MobiRecord
+    attr_accessor(:attributes)
+    attr_accessor(:uid)
+    attr_accessor(:body)
+
+    def initialize(attributes: 0, uid: 0, body: '')
+      @attributes = attributes
+      @uid = uid
+      @body = body
+    end
+  end
+
   # Represents a single Mobi file
   class Mobi # rubocop:disable Metrics/ClassLength
-    # Max name length, without null terminating character
-    NAME_LEN = 31
+    # Max name length, including null terminating character
+    NAME_LEN = 32
+    TYPE_LEN = 4
+    CREATOR_LEN = 4
 
     # @return [String]
     attr_accessor(:name)
@@ -27,7 +42,8 @@ module Dyck
     attr_reader(:creator)
     attr_accessor(:uid)
     attr_accessor(:next_rec)
-    attr_accessor(:rec_count)
+    # @return [Array<Dyck::MobiRecord>]
+    attr_reader(:records)
 
     # @param name [String]
     # @param ctime [Time]
@@ -47,7 +63,7 @@ module Dyck
       creator: 'MOBI',
       uid: 0,
       next_rec: 0,
-      rec_count: 0
+      records: []
     )
       raise ArgumentError, %(Unsupported file type: #{type}) if type != 'BOOK'
 
@@ -64,7 +80,7 @@ module Dyck
       @creator = creator
       @uid = uid
       @next_rec = next_rec
-      @rec_count = rec_count
+      @records = records
     end
 
     class << self
@@ -84,8 +100,8 @@ module Dyck
       # @param io [IO]
       # @return [Dyck::Mobi]
       def read_io(io) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-        Mobi.new(
-          name: io.read(NAME_LEN + 1).unpack1('Z*').encode('UTF-8'),
+        mobi = Mobi.new(
+          name: io.read(NAME_LEN).unpack1('Z*').encode('UTF-8'),
           attributes: io.read(2).unpack1('n'),
           version: io.read(2).unpack1('n'),
           ctime: Time.at(io.read(4).unpack1('N')).utc,
@@ -94,12 +110,33 @@ module Dyck
           mod_num: io.read(4).unpack1('N'),
           appinfo_offset: io.read(4).unpack1('N'),
           sortinfo_offset: io.read(4).unpack1('N'),
-          type: io.read(4).unpack1('Z*').encode('UTF-8'),
-          creator: io.read(4).unpack1('Z*').encode('UTF-8'),
+          type: io.read(TYPE_LEN).unpack1('Z*').encode('UTF-8'),
+          creator: io.read(CREATOR_LEN).unpack1('Z*').encode('UTF-8'),
           uid: io.read(4).unpack1('N'),
-          next_rec: io.read(4).unpack1('N'),
-          rec_count: io.read(2).unpack1('n')
+          next_rec: io.read(4).unpack1('N')
         )
+
+        read_records(io, mobi)
+      end
+
+      def read_records(io, mobi) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+        record_count = io.read(2).unpack1('n')
+        record_offsets = []
+        (0..record_count - 1).each do |_|
+          record_offsets << io.read(4).unpack1('N')
+          mobi.records << MobiRecord.new(
+            attributes: io.read(1).unpack1('C'),
+            uid: io.read(1).unpack1('C') << 16 | io.read(2).unpack1('n')
+          )
+        end
+        io.seek(0, IO::SEEK_END)
+        eof = io.tell
+        mobi.records.each_with_index do |record, index|
+          io.seek(record_offsets[index])
+          end_offset = index < record_offsets.size - 1 ? record_offsets[index + 1] : eof
+          record.body = io.read(end_offset - record_offsets[index])
+        end
+        mobi
       end
     end
 
@@ -116,7 +153,7 @@ module Dyck
     private
 
     def write_io(io) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-      io.write(@name.encode('ASCII')[0..NAME_LEN].ljust(NAME_LEN + 1, "\0"))
+      io.write(@name.encode('ASCII')[0..NAME_LEN - 2].ljust(NAME_LEN, "\0"))
       io.write([@attributes].pack('n'))
       io.write([@version].pack('n'))
       io.write([@ctime.to_i].pack('N'))
@@ -125,11 +162,28 @@ module Dyck
       io.write([@mod_num].pack('N'))
       io.write([@appinfo_offset].pack('N'))
       io.write([@sortinfo_offset].pack('N'))
-      io.write(@type.encode('ASCII')[0..3].ljust(4, "\0"))
-      io.write(@creator.encode('ASCII')[0..3].ljust(4, "\0"))
+      io.write(@type.encode('ASCII')[0..TYPE_LEN - 1].ljust(TYPE_LEN, "\0"))
+      io.write(@creator.encode('ASCII')[0..CREATOR_LEN - 1].ljust(CREATOR_LEN, "\0"))
       io.write([@uid].pack('N'))
       io.write([@next_rec].pack('N'))
-      io.write([@rec_count].pack('n'))
+      write_records(io)
+    end
+
+    def write_records(io) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+      io.write([@records.size].pack('n'))
+      # Write record headers
+      offset = io.tell + 8 * @records.size
+      @records.each do |record|
+        io.write([offset].pack('N'))
+        io.write([record.attributes].pack('C'))
+        io.write([record.uid >> 16].pack('C'))
+        io.write([record.uid & 0xFF].pack('n'))
+        offset += record.body.bytesize
+      end
+      # Write record bodies
+      @records.each do |record|
+        io.write(record.body)
+      end
       io
     end
   end

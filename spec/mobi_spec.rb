@@ -56,8 +56,10 @@ RSpec.shared_examples 'sample book' do # rubocop:disable Metrics/BlockLength
     expect(subject.next_rec).to eq(0)
   end
 
-  it 'has rec_count' do
-    expect(subject.rec_count).to eq(61)
+  it 'has records' do
+    expect(subject.records.size).to eq(61)
+    expect(subject.records[42].uid).to eq(86)
+    expect(subject.records[42].body).to start_with('w:0002?mime=text/css);/* @page is for EPUB2 only */')
   end
 end
 
@@ -69,7 +71,7 @@ describe 'existing file' do
   it_behaves_like 'sample book'
 end
 
-describe 'copy created by Dick' do
+describe 'copy created by Dyck' do
   subject do
     original = Dyck::Mobi.read(fixture_file('sample-book.mobi'))
     io = original.write(StringIO.new)
