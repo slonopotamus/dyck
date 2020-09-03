@@ -28,6 +28,10 @@ RSpec.shared_examples 'sample book' do # rubocop:disable Metrics/BlockLength
     expect(subject.mtime).to eq(Time.parse('2020-09-01 18:52:27 UTC'))
   end
 
+  it 'has btime' do
+    expect(subject.btime).to eq(Time.at(0))
+  end
+
   it 'has mod_num' do
     expect(subject.mod_num).to eq(0)
   end
@@ -41,11 +45,11 @@ RSpec.shared_examples 'sample book' do # rubocop:disable Metrics/BlockLength
   end
 
   it 'has type' do
-    expect(subject.type).to eq('BOOK')
+    expect(subject.type).to eq(Dyck::Mobi::BOOK_MAGIC)
   end
 
   it 'has creator' do
-    expect(subject.creator).to eq('MOBI')
+    expect(subject.creator).to eq(Dyck::Mobi::MOBI_MAGIC)
   end
 
   it 'has uid' do
@@ -62,7 +66,7 @@ RSpec.shared_examples 'sample book' do # rubocop:disable Metrics/BlockLength
     expect(subject.records[42].body).to start_with('w:0002?mime=text/css);/* @page is for EPUB2 only */')
   end
 
-  it 'has kf7' do
+  it 'has KF7 header' do
     expect(subject.kf7).not_to be_nil
     expect(subject.kf7.compression).to eq(Dyck::MobiData::NO_COMPRESSION)
     expect(subject.kf7.encryption).to eq(Dyck::MobiData::NO_ENCRYPTION)
@@ -92,12 +96,16 @@ describe 'copy created by Dyck' do
 end
 
 describe 'empty Mobi' do
-  it 'can save and load' do
-    original = Dyck::Mobi.new
-    io = original.write(StringIO.new)
+  subject { Dyck::Mobi.new }
+  it 'does not change after save/load' do
+    io = subject.write(StringIO.new)
     io.seek(0)
     mobi = Dyck::Mobi.read(io)
 
-    expect(Marshal.dump(mobi)).to eq(Marshal.dump(original))
+    expect(Marshal.dump(mobi)).to eq(Marshal.dump(subject))
+  end
+
+  it 'has KF7 header' do
+    expect(subject.kf7).not_to be_nil
   end
 end

@@ -60,6 +60,7 @@ module Dyck
     NAME_LEN = 32
     TYPE_LEN = 4
     CREATOR_LEN = 4
+    BOOK_MAGIC = 'BOOK'
     MOBI_MAGIC = 'MOBI'
 
     # @return [String]
@@ -100,13 +101,13 @@ module Dyck
       mod_num: 0,
       appinfo_offset: 0,
       sortinfo_offset: 0,
-      type: 'BOOK',
+      type: BOOK_MAGIC,
       creator: MOBI_MAGIC,
       uid: 0,
       next_rec: 0,
       records: []
     )
-      raise ArgumentError, %(Unsupported type: #{type}) if type != 'BOOK'
+      raise ArgumentError, %(Unsupported type: #{type}) if type != BOOK_MAGIC
       raise ArgumentError, %(Unsupported creator: #{type}) if creator != MOBI_MAGIC
 
       @name = name
