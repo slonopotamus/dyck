@@ -161,7 +161,7 @@ module Dyck
         )
 
         read_records(io, mobi)
-        @kf7 = read_record0(mobi.records[0]) unless mobi.records.empty?
+        mobi.kf7 = read_record0(mobi.records[0]) unless mobi.records.empty?
         mobi
       end
 
