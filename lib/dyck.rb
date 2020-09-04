@@ -16,41 +16,67 @@ module Dyck
     end
   end
 
+  # A single EXTH metadata record
+  class ExthRecord
+    EXTH_KF8BOUNDARY = 121
+    # TODO: constants for tag types
+    attr_reader(:tag)
+    attr_accessor(:data)
+
+    def initialize(tag: 1, data: '')
+      @tag = tag
+      @data = data
+    end
+
+    def data_uint16
+      @data.unpack1('N')
+    end
+  end
+
   # A single KF7/KF8 metadata
   class MobiData
-    NO_COMPRESSION = 1
-    PALMDOC_COMPRESSION = 2
-    HUFF_COMPRESSION = 17_480
-    SUPPORTED_COMPRESSIONS = [NO_COMPRESSION].freeze
     attr_accessor(:compression)
 
-    NO_ENCRYPTION = 0
-    OLD_ENCRYPTION = 1
-    MOBI_ENCRYPTION = 2
-    SUPPORTED_ENCRYPTIONS = [NO_ENCRYPTION].freeze
     attr_accessor(:encryption)
 
     attr_accessor(:mobi_type)
 
-    TEXT_ENCODING_CP1252 = 1252
-    TEXT_ENCODING_UTF8 = 65_001
-    SUPPORTED_TEXT_ENCODINGS = [TEXT_ENCODING_UTF8].freeze
     attr_accessor(:text_encoding)
 
     attr_accessor(:version)
+    attr_reader(:exth_records)
 
-    def initialize(
-      compression: NO_COMPRESSION,
-      encryption: NO_ENCRYPTION,
+    def initialize( # rubocop:disable Metrics/ParameterLists
+      compression: Mobi::NO_COMPRESSION,
+      encryption: Mobi::NO_ENCRYPTION,
       mobi_type: 2,
-      text_encoding: TEXT_ENCODING_UTF8,
-      version: 6
+      text_encoding: Mobi::TEXT_ENCODING_UTF8,
+      version: 6,
+      exth_records: []
     )
       @compression = compression
       @encryption = encryption
       @mobi_type = mobi_type
       @text_encoding = text_encoding
       @version = version
+      @exth_records = exth_records
+    end
+
+    def set_exth(tag, data)
+      record = find_exth(tag)
+      if record.nil?
+        @exth_records << ExthRecord.new(tag: tag, data: data)
+      else
+        record.data = data
+      end
+    end
+
+    def remove_exth(tag)
+      @exth_records.reject! { |record| record.tag == tag }
+    end
+
+    def find_exth(tag)
+      @exth_records.detect { |record| record.tag == tag }
     end
   end
 
@@ -60,8 +86,24 @@ module Dyck
     NAME_LEN = 32
     TYPE_LEN = 4
     CREATOR_LEN = 4
-    BOOK_MAGIC = 'BOOK'
-    MOBI_MAGIC = 'MOBI'
+    BOOK_MAGIC = 'BOOK'.b
+    MOBI_MAGIC = 'MOBI'.b
+    EXTH_MAGIC = 'EXTH'.b
+    PALMDB_HEADER = %(A#{NAME_LEN}nnNNNNNNa#{TYPE_LEN}a#{CREATOR_LEN}NNn)
+
+    NO_COMPRESSION = 1
+    PALMDOC_COMPRESSION = 2
+    HUFF_COMPRESSION = 17_480
+    SUPPORTED_COMPRESSIONS = [NO_COMPRESSION].freeze
+
+    NO_ENCRYPTION = 0
+    OLD_ENCRYPTION = 1
+    MOBI_ENCRYPTION = 2
+    SUPPORTED_ENCRYPTIONS = [NO_ENCRYPTION].freeze
+
+    TEXT_ENCODING_CP1252 = 1252
+    TEXT_ENCODING_UTF8 = 65_001
+    SUPPORTED_TEXT_ENCODINGS = [TEXT_ENCODING_UTF8].freeze
 
     # @return [String]
     attr_accessor(:name)
@@ -86,26 +128,18 @@ module Dyck
     attr_reader(:records)
     # @return [Dyck::MobiData]
     attr_accessor(:kf7)
+    # @return [Dyck::ExthRecord]
+    attr_accessor(:kf8_boundary)
+    # @return [Dyck::MobiData]
+    attr_accessor(:kf8)
 
     # @param name [String]
     # @param ctime [Time]
     # @param mtime [Time]
     # @param btime [Time]
-    def initialize( # rubocop:disable Metrics/MethodLength, Metrics/ParameterLists
-      name: '',
-      attributes: 0,
-      version: 0,
-      ctime: Time.now.utc,
-      mtime: Time.now.utc,
-      btime: Time.at(0).utc,
-      mod_num: 0,
-      appinfo_offset: 0,
-      sortinfo_offset: 0,
-      type: BOOK_MAGIC,
-      creator: MOBI_MAGIC,
-      uid: 0,
-      next_rec: 0,
-      records: []
+    def initialize( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
+      name: '', attributes: 0, version: 0, ctime: Time.now.utc, mtime: Time.now.utc, btime: Time.at(0).utc, mod_num: 0,
+      appinfo_offset: 0, sortinfo_offset: 0, type: BOOK_MAGIC, creator: MOBI_MAGIC, uid: 0, next_rec: 0, records: []
     )
       raise ArgumentError, %(Unsupported type: #{type}) if type != BOOK_MAGIC
       raise ArgumentError, %(Unsupported creator: #{type}) if creator != MOBI_MAGIC
@@ -125,6 +159,8 @@ module Dyck
       @next_rec = next_rec
       @records = records
       @kf7 = MobiData.new
+      @kf8_boundary = nil
+      @kf8 = nil
     end
 
     class << self
@@ -143,37 +179,23 @@ module Dyck
 
       # @param io [IO]
       # @return [Dyck::Mobi]
-      def read_io(io) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+      def read_io(io) # rubocop:disable Metrics/AbcSize
+        name, attributes, version, ctime, mtime, btime, mod_num, appinfo_offset, sortinfo_offset, type, creator, uid,
+            next_rec, record_count = io.read(78).unpack(PALMDB_HEADER)
         mobi = Mobi.new(
-          name: io.read(NAME_LEN).unpack1('Z*').encode('UTF-8'),
-          attributes: io.read(2).unpack1('n'),
-          version: io.read(2).unpack1('n'),
-          ctime: Time.at(io.read(4).unpack1('N')).utc,
-          mtime: Time.at(io.read(4).unpack1('N')).utc,
-          btime: Time.at(io.read(4).unpack1('N')).utc,
-          mod_num: io.read(4).unpack1('N'),
-          appinfo_offset: io.read(4).unpack1('N'),
-          sortinfo_offset: io.read(4).unpack1('N'),
-          type: io.read(TYPE_LEN).unpack1('Z*').encode('UTF-8'),
-          creator: io.read(CREATOR_LEN).unpack1('Z*').encode('UTF-8'),
-          uid: io.read(4).unpack1('N'),
-          next_rec: io.read(4).unpack1('N')
+          name: name.encode('UTF-8'), attributes: attributes, version: version, ctime: Time.at(ctime).utc,
+          mtime: Time.at(mtime).utc, btime: Time.at(btime).utc, mod_num: mod_num, appinfo_offset: appinfo_offset,
+          sortinfo_offset: sortinfo_offset, type: type, creator: creator, uid: uid, next_rec: next_rec
         )
-
-        read_records(io, mobi)
-        mobi.kf7 = read_record0(mobi.records[0]) unless mobi.records.empty?
+        read_records(mobi, io, record_count)
         mobi
       end
 
-      def read_records(io, mobi) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
-        record_count = io.read(2).unpack1('n')
+      def read_records(mobi, io, record_count) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
         record_offsets = []
-        (0..record_count - 1).each do |_|
-          record_offsets << io.read(4).unpack1('N')
-          mobi.records << MobiRecord.new(
-            attributes: io.read(1).unpack1('C'),
-            uid: io.read(1).unpack1('C') << 16 | io.read(2).unpack1('n')
-          )
+        (0..record_count - 1).each do |index|
+          record_offsets[index], attributes, uid_high, uid_low = io.read(8).unpack('NCCn')
+          mobi.records << MobiRecord.new(attributes: attributes, uid: uid_high | uid_low)
         end
         io.seek(0, IO::SEEK_END)
         eof = io.tell
@@ -182,54 +204,62 @@ module Dyck
           end_offset = index < record_offsets.size - 1 ? record_offsets[index + 1] : eof
           record.body = io.read(end_offset - record_offsets[index])
         end
+        mobi.kf7 = read_record0(mobi.records[0]) unless mobi.records.empty?
+
+        mobi.kf8_boundary = mobi.kf7.find_exth(ExthRecord::EXTH_KF8BOUNDARY)
+        return if mobi.kf8_boundary.nil?
+
+        mobi.kf8 = read_record0(mobi.records[mobi.kf8_boundary.data_uint16])
       end
 
       # @param record [Dyck::MobiRecord]
       # @return [Dyck::MobiData]
       def read_record0(record) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-        raise ArgumentError, 'Expected at least 16 bytes in record0' if record.body.bytesize < 16
-
         io = StringIO.new(record.body)
         io.binmode
 
         result = MobiData.new
-        result.compression = io.read(2).unpack1('n')
-        unless MobiData::SUPPORTED_COMPRESSIONS.include? result.compression
+        result.compression, _zero, _text_length, _text_record_count, _text_record_size, result.encryption, _unknown1 =
+          io.read(16).unpack('nnNn*')
+        unless Mobi::SUPPORTED_COMPRESSIONS.include? result.compression
           raise ArgumentError, %(Unsupported compression: #{result.compression})
         end
-
-        io.read(2) # unused 2 bytes, zeroes
-        _text_length = io.read(4).unpack1('N')
-        _text_record_count = io.read(2).unpack1('n')
-        _text_record_size = io.read(2).unpack1('n')
-
-        result.encryption = io.read(2).unpack1('n')
-        unless MobiData::SUPPORTED_ENCRYPTIONS.include? result.encryption
+        unless Mobi::SUPPORTED_ENCRYPTIONS.include? result.encryption
           raise ArgumentError, %(Unsupported encryption: #{result.encryption})
         end
 
-        _unknown1 = io.read(2).unpack1('n')
+        read_mobi_header(result, io)
+        read_exth_header(result, io)
 
-        # Mobi header starts here
+        result
+      end
 
+      def read_mobi_header(mobi_record, io)
         magic = io.read(4)
         raise ArgumentError, %(Unsupported magic: #{magic}) if magic != MOBI_MAGIC
 
-        header_length = io.read(4).unpack1('N')
-        header = StringIO.new(io.read(header_length - 8))
-        result.mobi_type = header.read(4).unpack1('N')
+        mobi_header_length = io.read(4).unpack1('N') - 8
+        mobi_header = StringIO.new(io.read(mobi_header_length))
+        mobi_record.mobi_type, mobi_record.text_encoding, _uid, mobi_record.version = mobi_header.read(16).unpack('N*')
 
-        result.text_encoding = header.read(4).unpack1('N')
-        unless MobiData::SUPPORTED_TEXT_ENCODINGS.include?(result.text_encoding)
-          raise ArgumentError, %(Unsupported text encoding: #{result.text_encoding})
+        unless Mobi::SUPPORTED_TEXT_ENCODINGS.include?(mobi_record.text_encoding) # rubocop:disable Style/GuardClause
+          raise ArgumentError, %(Unsupported text encoding: #{mobi_record.text_encoding})
         end
 
-        _uid = header.read(4).unpack1('N')
-        result.version = header.read(4).unpack1('N')
+        # ignore all the rest Mobi header fields for now
+      end
 
-        # ignore all the rest header fields for now
+      def read_exth_header(mobi_data, io) # rubocop:disable Metrics/AbcSize
+        exth = io.read(4)
+        raise ArgumentError, %(Unsupported EXTH: #{exth}) if exth != EXTH_MAGIC
 
-        result
+        exth_header_length, exth_record_count = io.read(8).unpack('N*')
+        exth_header = StringIO.new(io.read(exth_header_length - 12))
+        (0..exth_record_count - 1).each do |_|
+          tag, data_len = exth_header.read(8).unpack('N*')
+          data = exth_header.read(data_len - 8)
+          mobi_data.exth_records << ExthRecord.new(tag: tag, data: data)
+        end
       end
     end
 
@@ -245,65 +275,75 @@ module Dyck
 
     private
 
-    def write_io(io) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-      io.binmode
-      io.write(@name.encode('ASCII')[0..NAME_LEN - 2].ljust(NAME_LEN, "\0"))
-      io.write([@attributes].pack('n'))
-      io.write([@version].pack('n'))
-      io.write([@ctime.to_i].pack('N'))
-      io.write([@mtime.to_i].pack('N'))
-      io.write([@btime.to_i].pack('N'))
-      io.write([@mod_num].pack('N'))
-      io.write([@appinfo_offset].pack('N'))
-      io.write([@sortinfo_offset].pack('N'))
-      io.write(@type.encode('ASCII')[0..TYPE_LEN - 1].ljust(TYPE_LEN, "\0"))
-      io.write(@creator.encode('ASCII')[0..CREATOR_LEN - 1].ljust(CREATOR_LEN, "\0"))
-      io.write([@uid].pack('N'))
-      io.write([@next_rec].pack('N'))
-
+    def write_io(io)
       @records << MobiRecord.new if @records.empty?
+      update_kf8_boundary
       update_record0(@kf7, @records[0])
+      io.binmode
+      io.write([
+        @name, @attributes, @version, @ctime.to_i, @mtime.to_i, @btime.to_i, @mod_num, @appinfo_offset,
+        @sortinfo_offset, @type, @creator, @uid, @next_rec, @records.size
+      ].pack(PALMDB_HEADER))
       write_records(io)
+    end
+
+    def update_kf8_boundary
+      if @kf8
+        @records << MobiRecord.new unless @kf8_boundary
+        update_record0(@kf8, @records[-1])
+        @kf8_boundary = @kf7.set_exth(ExthRecord::EXTH_KF8BOUNDARY, [@records.size - 1].pack('N'))
+      elsif @kf8_boundary
+        @records.delete_at(@kf8_boundary.data_uint16)
+        @kf8_boundary = nil
+        @kf7.remove_exth(ExthRecord::EXTH_KF8BOUNDARY)
+      end
     end
 
     # @param mobi_data [Dyck::MobiData]
     # @param record [Dyck::MobiRecord]
-    def update_record0(mobi_data, record) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    def update_record0(mobi_data, record)
       io = StringIO.new
       io.binmode
-      io.write([mobi_data.compression].pack('n'))
-      io.write("\0\0")
       text_length = 0 # TODO
-      io.write([text_length].pack('N'))
       text_record_count = 0 # TODO
-      io.write([text_record_count].pack('n'))
       text_record_size = 4096
-      io.write([text_record_size].pack('n'))
-      io.write([mobi_data.encryption].pack('n'))
-      unknown1 = 0
-      io.write([unknown1].pack('n'))
+      io.write([mobi_data.compression, 0, text_length, text_record_count, text_record_size, mobi_data.encryption, 0]
+                   .pack('nnNn*'))
 
-      header_length = 24
-      io.write(MOBI_MAGIC)
-      io.write([header_length].pack('N'))
-      io.write([mobi_data.mobi_type].pack('N'))
-      io.write([mobi_data.text_encoding].pack('N'))
-      uid = 0
-      io.write([uid].pack('N'))
-      io.write([mobi_data.version].pack('N'))
+      write_mobi_header(mobi_data, io)
+      write_exth_header(mobi_data, io)
 
       record.body = io.string
     end
 
-    def write_records(io) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
-      io.write([@records.size].pack('n'))
+    def write_mobi_header(mobi_data, io)
+      header_length = 24
+      uid = 0
+      io.write(
+        [MOBI_MAGIC, header_length, mobi_data.mobi_type, mobi_data.text_encoding, uid, mobi_data.version] .pack('a*N*')
+      )
+    end
+
+    # @param mobi_data [Dyck::MobiData]
+    # @param io [StringIO]
+    def write_exth_header(mobi_data, io) # rubocop:disable Metrics/AbcSize
+      io.write(EXTH_MAGIC)
+
+      exth_header_length = 12
+      mobi_data.exth_records.each do |exth_record|
+        exth_header_length += exth_record.data.bytesize + 8
+      end
+      io.write([exth_header_length, mobi_data.exth_records.size].pack('N*'))
+      mobi_data.exth_records.each do |exth_record|
+        io.write([exth_record.tag, exth_record.data.bytesize + 8, exth_record.data].pack('NNa*'))
+      end
+    end
+
+    def write_records(io) # rubocop:disable Metrics/AbcSize
       # Write record headers
       offset = io.tell + 8 * @records.size
       @records.each do |record|
-        io.write([offset].pack('N'))
-        io.write([record.attributes].pack('C'))
-        io.write([record.uid >> 16].pack('C'))
-        io.write([record.uid & 0xFF].pack('n'))
+        io.write([offset, record.attributes, record.uid >> 16, record.uid & 0xFF].pack('NCCn'))
         offset += record.body.bytesize
       end
       # Write record bodies
