@@ -3,7 +3,7 @@
 require 'spec_helper'
 require 'time'
 
-RSpec.shared_examples 'sample Mobi' do
+RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
   it 'is not nil' do
     expect(subject).not_to be_nil
   end
@@ -20,6 +20,10 @@ RSpec.shared_examples 'sample Mobi' do
     expect(subject.kf7.exth_records[2].data).to eq('Sarah White')
   end
 
+  it 'has KF7 content' do
+    expect(subject.kf7.content.size).to eq(15_928)
+  end
+
   it 'has KF8 header' do
     expect(subject.kf8).not_to be_nil
     expect(subject.kf8.compression).to eq(Dyck::MobiData::NO_COMPRESSION)
@@ -30,6 +34,10 @@ RSpec.shared_examples 'sample Mobi' do
     expect(subject.kf8.exth_records.size).to eq(27)
     expect(subject.kf8.exth_records[2].tag).to eq(100)
     expect(subject.kf8.exth_records[2].data).to eq('Sarah White')
+  end
+
+  it 'has KF8 content' do
+    expect(subject.kf8.content.size).to eq(53_516)
   end
 end
 

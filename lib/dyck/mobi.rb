@@ -40,37 +40,51 @@ module Dyck
     MOBI_MAGIC = 'MOBI'.b
     EXTH_MAGIC = 'EXTH'.b
 
+    MAX_RECORD_SIZE = 4096
+
     attr_accessor(:compression)
     attr_accessor(:encryption)
     attr_accessor(:mobi_type)
     attr_accessor(:text_encoding)
     attr_accessor(:version)
+    # @return [Array<Dyck::ExthRecord>]
     attr_reader(:exth_records)
+    # @return [String]
+    attr_accessor(:content)
 
-    def initialize(
+    def initialize( # rubocop:disable Metrics/ParameterLists
       compression: NO_COMPRESSION,
       encryption: NO_ENCRYPTION,
       mobi_type: 2,
       text_encoding: TEXT_ENCODING_UTF8,
-      version: 6
+      version: 6,
+      exth_records: [],
+      content: ''.b
     )
       @compression = compression
       @encryption = encryption
       @mobi_type = mobi_type
       @text_encoding = text_encoding
       @version = version
-      @exth_records = []
+      @exth_records = exth_records
+      @content = content
+    end
+
+    def content_chunks
+      content.bytes.each_slice(MobiData::MAX_RECORD_SIZE).map do |chunk|
+        PalmDBRecord.new(content: chunk.pack('c*'))
+      end
     end
 
     class << self
-      # @param record [Dyck::PalmDBRecord]
+      # @param records [Array<Dyck::PalmDBRecord>]
       # @return [Dyck::MobiData]
-      def read(record) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-        io = StringIO.new(record.body)
+      def read(records, index) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+        io = StringIO.new(records[index].content)
         io.binmode
 
         result = MobiData.new
-        result.compression, _zero, _text_length, _text_record_count, _text_record_size, result.encryption, _unknown1 =
+        result.compression, _zero, _text_length, text_record_count, _text_record_size, result.encryption, _unknown1 =
           io.read(16).unpack('nnNn*')
         unless SUPPORTED_COMPRESSIONS.include? result.compression
           raise ArgumentError, %(Unsupported compression: #{result.compression})
@@ -79,17 +93,53 @@ module Dyck
           raise ArgumentError, %(Unsupported encryption: #{result.encryption})
         end
 
-        read_mobi_header(result, io)
+        extra_flags = read_mobi_header(result, io)
         read_exth_header(result, io)
+
+        (1..text_record_count).each do |idx|
+          content = records[index + idx].content
+          extra_size = get_record_extra_size(content, extra_flags)
+          bytesize = content.bytesize
+          len = bytesize - extra_size
+          result.content += content[0..len - 1]
+        end
 
         result
       end
 
       private
 
+      # @param data [String]
+      # @param offset [Fixnum]
+      def get_varlen_dec(data, offset)
+        bitpos = 0
+        result = 0
+        loop do
+          v = data[offset - 1].unpack1('C')
+          result |= (v & 0x7F) << bitpos
+          bitpos += 7
+          offset -= 1
+          return result if (v & 0x80) != 0 || offset.zero?
+        end
+      end
+
+      # @param data [String]
+      # @param extra_flags [Fixnum]
+      def get_record_extra_size(data, extra_flags)
+        num = 0
+        size = data.size
+        flags = extra_flags >> 1
+        while flags != 0
+          num += get_varlen_dec(data, size - num) if (flags & 1) != 0
+          flags >>= 1
+        end
+        num += (data[size - num - 1].unpack1('C') & 0x3) + 1 if (extra_flags & 1) != 0
+        num
+      end
+
       # @param mobi_data [Dyck::MobiData]
       # @param io [IO, StringIO]
-      def read_mobi_header(mobi_data, io)
+      def read_mobi_header(mobi_data, io) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
         magic = io.read(4)
         raise ArgumentError, %(Unsupported magic: #{magic}) if magic != MOBI_MAGIC
 
@@ -97,11 +147,16 @@ module Dyck
         mobi_header = StringIO.new(io.read(mobi_header_length))
         mobi_data.mobi_type, mobi_data.text_encoding, _uid, mobi_data.version = mobi_header.read(16).unpack('N*')
 
-        unless SUPPORTED_TEXT_ENCODINGS.include?(mobi_data.text_encoding) # rubocop:disable Style/GuardClause
+        # ignore all the rest Mobi header fields for now
+        mobi_header.seek(202, IO::SEEK_CUR)
+        extra_flags = mobi_header.read(2)&.unpack1('n') || 0
+        # there are more fields *after* extra_flags
+
+        unless SUPPORTED_TEXT_ENCODINGS.include?(mobi_data.text_encoding)
           raise ArgumentError, %(Unsupported text encoding: #{mobi_data.text_encoding})
         end
 
-        # ignore all the rest Mobi header fields for now
+        extra_flags
       end
 
       # @param mobi_data [Dyck::MobiData]
@@ -121,18 +176,16 @@ module Dyck
     end
 
     # @param record [Dyck::PalmDBRecord]
-    def write(record)
+    def write(record, text_record_count)
       io = StringIO.new
       io.binmode
       text_length = 0 # TODO
-      text_record_count = 0 # TODO
-      text_record_size = 4096
-      io.write([compression, 0, text_length, text_record_count, text_record_size, encryption, 0].pack('nnNn*'))
+      io.write([compression, 0, text_length, text_record_count, MAX_RECORD_SIZE, encryption, 0].pack('nnNn*'))
 
       write_mobi_header(io)
       write_exth_header(io)
 
-      record.body = io.string
+      record.content = io.string
     end
 
     def set_exth(tag, data)
@@ -206,16 +259,12 @@ module Dyck
         raise ArgumentError, %(Unsupported type: #{palmdb.type}) if palmdb.type != TYPE_MAGIC
         raise ArgumentError, %(Unsupported creator: #{palmdb.type}) if palmdb.creator != CREATOR_MAGIC
 
-        kf7 = palmdb.records.empty? ? MobiData.new : MobiData.read(palmdb.records[0])
-        mobi = Mobi.new(kf7: kf7)
+        kf7 = palmdb.records.empty? ? MobiData.new : MobiData.read(palmdb.records, 0)
 
-        kf8_boundary = mobi.kf7.find_exth(ExthRecord::KF8_BOUNDARY)
-        unless kf8_boundary.nil?
-          kf8_header = palmdb.records[kf8_boundary.data_uint32]
-          mobi.kf8 = MobiData.read(kf8_header)
-        end
+        kf8_boundary = kf7.find_exth(ExthRecord::KF8_BOUNDARY)
+        kf8 = kf8_boundary.nil? ? nil : MobiData.read(palmdb.records, kf8_boundary.data_uint32)
 
-        mobi
+        Mobi.new(kf7: kf7, kf8: kf8)
       end
     end
 
@@ -224,21 +273,19 @@ module Dyck
     end
 
     # @return [Dyck::PalmDB]
-    def to_palmdb # rubocop:disable Metrics/MethodLength
+    def to_palmdb # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
       palmdb = PalmDB.new(type: TYPE_MAGIC, creator: CREATOR_MAGIC)
-      kf7_record = PalmDBRecord.new
-      palmdb.records << kf7_record
+      palmdb.records << (kf7_header = PalmDBRecord.new)
+      palmdb.records.concat(kf7_content_chunks = @kf7.content_chunks)
 
+      @kf7.remove_exth(ExthRecord::KF8_BOUNDARY)
       if @kf8
-        kf8_record = PalmDBRecord.new
-        palmdb.records << kf8_record
-        @kf8.write(kf8_record)
-        @kf7.set_exth(ExthRecord::KF8_BOUNDARY, [palmdb.records.size - 1].pack('N'))
-      else
-        @kf7.remove_exth(ExthRecord::KF8_BOUNDARY)
+        @kf7.set_exth(ExthRecord::KF8_BOUNDARY, [palmdb.records.size].pack('N'))
+        palmdb.records << (kf8_header = PalmDBRecord.new)
+        palmdb.records.concat(kf8_content_chunks = @kf8.content_chunks)
+        @kf8.write(kf8_header, kf8_content_chunks.size)
       end
-      @kf7.write(kf7_record)
-
+      @kf7.write(kf7_header, kf7_content_chunks.size)
       palmdb
     end
   end
