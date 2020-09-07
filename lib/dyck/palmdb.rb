@@ -5,12 +5,12 @@ module Dyck
   class PalmDBRecord
     attr_accessor(:attributes)
     attr_accessor(:uid)
-    attr_accessor(:body)
+    attr_accessor(:content)
 
-    def initialize(attributes: 0, uid: 0, body: '')
+    def initialize(attributes: 0, uid: 0, content: '')
       @attributes = attributes
       @uid = uid
-      @body = body
+      @content = content
     end
   end
 
@@ -107,7 +107,7 @@ module Dyck
         result.records.each_with_index do |record, index|
           io.seek(record_offsets[index])
           end_offset = index < record_offsets.size - 1 ? record_offsets[index + 1] : eof
-          record.body = io.read(end_offset - record_offsets[index])
+          record.content = io.read(end_offset - record_offsets[index])
         end
       end
     end
@@ -138,11 +138,11 @@ module Dyck
       offset = io.tell + 8 * @records.size
       @records.each do |record|
         io.write([offset, record.attributes, record.uid >> 16, record.uid & 0xFF].pack('NCCn'))
-        offset += record.body.bytesize
+        offset += record.content.bytesize
       end
-      # Write record bodies
+      # Write record contents
       @records.each do |record|
-        io.write(record.body)
+        io.write(record.content)
       end
       io
     end

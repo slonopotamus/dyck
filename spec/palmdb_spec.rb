@@ -63,7 +63,7 @@ RSpec.shared_examples 'sample PalmDB' do # rubocop:disable Metrics/BlockLength
   it 'has records' do
     expect(subject.records.size).to eq(61)
     expect(subject.records[42].uid).to eq(86)
-    expect(subject.records[42].body).to start_with('w:0002?mime=text/css);/* @page is for EPUB2 only */')
+    expect(subject.records[42].content).to start_with('w:0002?mime=text/css);/* @page is for EPUB2 only */')
   end
 end
 
