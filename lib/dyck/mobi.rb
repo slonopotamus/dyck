@@ -381,7 +381,7 @@ module Dyck
       publisher: ''.b,
       description: ''.b,
       subjects: [],
-      publishing_date: Time.now,
+      publishing_date: Time.now.round,
       copyright: ''.b
     )
       @kf7 = kf7
