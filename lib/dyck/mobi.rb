@@ -13,6 +13,7 @@ module Dyck
     DESCRIPTION = 103
     SUBJECT = 105
     PUBLISHING_DATE = 106
+    RIGHTS = 109
     KF8_BOUNDARY = 121
 
     attr_reader(:tag)
@@ -359,6 +360,8 @@ module Dyck
     attr_accessor(:subjects)
     # @return [Time]
     attr_accessor(:publishing_date)
+    # @return [String]
+    attr_accessor(:copyright)
 
     # @param kf7 [Dyck::MobiData]
     # @param kf8 [Dyck::MobiData, nil]
@@ -368,6 +371,7 @@ module Dyck
     # @param description [String]
     # @param subjects [Array<String>]
     # @param publishing_date [Time]
+    # @param copyright [String]
     def initialize( # rubocop:disable Metrics/ParameterLists
       kf7: MobiData.new,
       kf8: nil,
@@ -377,7 +381,8 @@ module Dyck
       publisher: ''.b,
       description: ''.b,
       subjects: [],
-      publishing_date: Time.now
+      publishing_date: Time.now,
+      copyright: ''.b
     )
       @kf7 = kf7
       @kf8 = kf8
@@ -388,6 +393,7 @@ module Dyck
       @description = description
       @subjects = subjects
       @publishing_date = publishing_date
+      @copyright = copyright
     end
 
     class << self
@@ -429,7 +435,8 @@ module Dyck
           publisher: ExthRecord.find(ExthRecord::PUBLISHER, exth_records)&.data || ''.b,
           description: ExthRecord.find(ExthRecord::DESCRIPTION, exth_records)&.data || ''.b,
           subjects: exth_records.select { |r| r.tag == ExthRecord::SUBJECT }.map(&:data),
-          publishing_date: publishing_date.nil? ? Time.now : Time.iso8601(publishing_date)
+          publishing_date: publishing_date.nil? ? Time.now : Time.iso8601(publishing_date),
+          copyright: ExthRecord.find(ExthRecord::RIGHTS, exth_records)&.data || ''.b
         )
       end
 
@@ -493,7 +500,8 @@ module Dyck
         ExthRecord.new(tag: ExthRecord::AUTHOR, data: @author),
         ExthRecord.new(tag: ExthRecord::PUBLISHER, data: @publisher),
         ExthRecord.new(tag: ExthRecord::DESCRIPTION, data: @description),
-        ExthRecord.new(tag: ExthRecord::PUBLISHING_DATE, data: @publishing_date.utc.iso8601)
+        ExthRecord.new(tag: ExthRecord::PUBLISHING_DATE, data: @publishing_date.utc.iso8601),
+        ExthRecord.new(tag: ExthRecord::RIGHTS, data: @copyright)
       ]
       exth_records += @subjects.map { |s| ExthRecord.new(tag: ExthRecord::SUBJECT, data: s) }
 

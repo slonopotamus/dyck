@@ -33,6 +33,10 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.publishing_date).to eq(Time.iso8601('2014-04-14T21:00:00Z'))
   end
 
+  it 'has copyright' do
+    expect(subject.copyright).to eq('CC-BY-SA 3.0')
+  end
+
   it 'has KF7 header' do
     expect(subject.kf7).not_to be_nil
     expect(subject.kf7.compression).to eq(Dyck::MobiData::NO_COMPRESSION)
