@@ -41,6 +41,10 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.kf8.flow[0].size).to eq(20_169)
     expect(subject.kf8.flow[5].size).to eq(44)
   end
+
+  it 'has resources' do
+    expect(subject.resources.size).to eq(15)
+  end
 end
 
 describe 'existing file' do

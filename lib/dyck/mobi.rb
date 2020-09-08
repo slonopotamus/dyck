@@ -3,6 +3,8 @@
 require 'dyck/palmdb'
 
 module Dyck
+  MobiResource = Struct.new(:type, :content)
+
   # A single EXTH metadata record
   class ExthRecord
     KF8_BOUNDARY = 121
@@ -45,6 +47,8 @@ module Dyck
 
     MAX_RECORD_SIZE = 4096
 
+    MOBI_NOTSET = 0xffffffff
+
     attr_accessor(:compression)
     attr_accessor(:encryption)
     attr_accessor(:mobi_type)
@@ -75,7 +79,6 @@ module Dyck
 
     class << self
       # @param records [Array<Dyck::PalmDBRecord>]
-      # @return [Dyck::MobiData]
       def read(records, index) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
         io = StringIO.new(records[index].content)
         io.binmode
@@ -90,23 +93,29 @@ module Dyck
           raise ArgumentError, %(Unsupported encryption: #{result.encryption})
         end
 
-        extra_flags, fdst_index, fdst_section_count = read_mobi_header(result, io)
+        extra_flags, fdst_index, fdst_section_count, image_index = read_mobi_header(result, io)
         result.exth_records.concat(read_exth_header(io))
 
         content = read_content(index + 1, text_record_count, records, extra_flags)
         fdst = read_fdst(fdst_index, index, records, fdst_section_count)
-        result.flow = if fdst.nil?
-                        content.empty? ? [] : [content]
-                      else
-                        fdst.map do |range|
-                          content[range.begin..range.end - 1]
-                        end
-                      end
+        result.flow = reconstruct_flow(content, fdst)
 
-        result
+        [result, image_index]
       end
 
       private
+
+      # @param content [String]
+      # @param fdst [Array<Range>, nil]
+      # @return [Array<String>]
+      def reconstruct_flow(content, fdst)
+        return [] if content.empty?
+        return [content] if fdst.nil?
+
+        fdst.map do |range|
+          content[range.begin..range.end - 1]
+        end
+      end
 
       # @param offset [Fixnum]
       # @param count [Fixnum]
@@ -178,12 +187,14 @@ module Dyck
 
         mobi_header_length = io.read(4).unpack1('N') - 8
         mobi_header = StringIO.new(io.read(mobi_header_length))
-        mobi_data.mobi_type, mobi_data.text_encoding, _uid, mobi_data.version, = mobi_header.read(42 * 4).unpack('N*')
+        mobi_data.mobi_type, mobi_data.text_encoding, _uid, mobi_data.version, = mobi_header.read(21 * 4).unpack('N*')
 
         unless SUPPORTED_TEXT_ENCODINGS.include?(mobi_data.text_encoding)
           raise ArgumentError, %(Unsupported text encoding: #{mobi_data.text_encoding})
         end
 
+        # there are more fields here
+        image_index, = mobi_header.read(21 * 4)&.unpack('N')
         # there are more fields here
         if mobi_data.version >= 8
           fdst_index = mobi_header.read(4)&.unpack1('N')
@@ -197,7 +208,7 @@ module Dyck
         extra_flags = mobi_header.read(2)&.unpack1('n') || 0
         # there are more fields here
 
-        [extra_flags, fdst_index, fdst_section_count]
+        [extra_flags, fdst_index, fdst_section_count, image_index]
       end
 
       # @param io [IO, StringIO]
@@ -219,19 +230,20 @@ module Dyck
     # @param header_record [Dyck::PalmDBRecord]
     # @param text_record_count [Fixnum]
     # @param fdst_index [Fixnum]
-    def write(header_record, text_record_count, fdst_index)
+    # @param image_index [Fixnum]
+    def write(header_record, text_record_count, fdst_index, image_index)
       io = StringIO.new
       io.binmode
       text_length = 0 # TODO
       io.write([compression, 0, text_length, text_record_count, MAX_RECORD_SIZE, encryption, 0].pack('nnNn*'))
 
-      write_mobi_header(io, fdst_index, @flow.size)
+      write_mobi_header(io, fdst_index, @flow.size, image_index)
       write_exth_header(io)
 
       header_record.content = io.string
     end
 
-    # @param tag [String]
+    # @param tag [Fixnum]
     # @param data [String]
     def set_exth(tag, data)
       record = find_exth(tag)
@@ -242,11 +254,12 @@ module Dyck
       end
     end
 
-    # @param tag [String]
+    # @param tag [Fixnum]
     def remove_exth(tag)
       @exth_records.reject! { |record| record.tag == tag }
     end
 
+    # @param tag [Fixnum]
     # @return [Dyck::ExthRecord, nil]
     def find_exth(tag)
       @exth_records.detect { |record| record.tag == tag }
@@ -278,11 +291,14 @@ module Dyck
     # @param io [IO, StringIO]
     # @param fdst_index [Fixnum]
     # @param fdst_section_count [Fixnum]
-    def write_mobi_header(io, fdst_index, fdst_section_count)
+    # @param image_index [Fixnum]
+    def write_mobi_header(io, fdst_index, fdst_section_count, image_index)
       header_length = 184
       uid = 0
       io.write([MOBI_MAGIC, header_length, @mobi_type, @text_encoding, uid, @version]
-                   .concat([0xffffffff] * 38)
+                   .concat([MOBI_NOTSET] * 17)
+                   .concat([image_index])
+                   .concat([MOBI_NOTSET] * 20)
                    .concat([fdst_index || 0, fdst_section_count])
                    .pack(%(A#{MOBI_MAGIC.bytesize}N*)))
     end
@@ -303,20 +319,35 @@ module Dyck
   end
 
   # Represents a single Mobi file
-  class Mobi
+  class Mobi # rubocop:disable Metrics/ClassLength
     TYPE_MAGIC = 'BOOK'.b
     CREATOR_MAGIC = 'MOBI'.b
+
+    EOF_MAGIC = "\xe9\x8e\r\n".b
+    BOUNDARY_MAGIC = 'BOUNDARY'.b
+
+    JPEG_MAGIC = "\xff\xd8\xff".b
+    GIF_MAGIC = "\x47\x49\x46\x38".b
+    PNG_MAGIC = "\x89\x50\x4e\x47\x0d\x0a\x1a\x0a".b
+    BMP_MAGIC = "\x42\x4d".b
+    FONT_MAGIC = 'FONT'.b
+    AUDIO_MAGIC = 'AUDI'.b
+    VIDEO_MAGIC = 'VIDE'.b
 
     # @return [Dyck::MobiData]
     attr_accessor(:kf7)
     # @return [Dyck::MobiData]
     attr_accessor(:kf8)
+    # @return [Array<Dyck::MobiResource>]
+    attr_accessor(:resources)
 
     # @param kf7 [Dyck::MobiData]
     # @param kf8 [Dyck::MobiData, nil]
-    def initialize(kf7: MobiData.new, kf8: nil)
+    # @param resources [Array<Dyck::MobiResource>]
+    def initialize(kf7: MobiData.new, kf8: nil, resources: [])
       @kf7 = kf7
       @kf8 = kf8
+      @resources = resources
     end
 
     class << self
@@ -332,12 +363,57 @@ module Dyck
         raise ArgumentError, %(Unsupported type: #{palmdb.type}) if palmdb.type != TYPE_MAGIC
         raise ArgumentError, %(Unsupported creator: #{palmdb.type}) if palmdb.creator != CREATOR_MAGIC
 
-        kf7 = palmdb.records.empty? ? MobiData.new : MobiData.read(palmdb.records, 0)
+        kf7, image_index = palmdb.records.empty? ? MobiData.new : MobiData.read(palmdb.records, 0)
 
         kf8_boundary = kf7.find_exth(ExthRecord::KF8_BOUNDARY)
-        kf8 = kf8_boundary.nil? ? nil : MobiData.read(palmdb.records, kf8_boundary.data_uint32)
+        kf8, = kf8_boundary.nil? ? [nil, nil] : MobiData.read(palmdb.records, kf8_boundary.data_uint32)
 
-        Mobi.new(kf7: kf7, kf8: kf8)
+        resources = read_resources(palmdb.records, image_index)
+        Mobi.new(kf7: kf7, kf8: kf8, resources: resources)
+      end
+
+      private
+
+      # @param records [Array<Dyck::PalmDBRecord>]
+      # @param image_index [Fixnum]
+      # @return [Array<Dyck::MobiResource>]
+      def read_resources(records, image_index) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+        return [] if image_index.nil?
+
+        result = []
+        (image_index..records.size - 1).map do |index| # rubocop:disable Metrics/BlockLength
+          content = records[index].content
+
+          break if content == BOUNDARY_MAGIC
+          break if content == EOF_MAGIC
+
+          type = nil
+          if content.start_with?(JPEG_MAGIC)
+            type = :jpeg
+          elsif content.start_with?(BMP_MAGIC)
+            size = content[2..6]&.unpack1('V')
+            type = :bmp if size == content.bytesize
+          elsif content.start_with?(GIF_MAGIC)
+            type = :gif
+          elsif content.start_with?(FONT_MAGIC)
+            # TODO: strip prefix
+            type = :font
+          elsif content.start_with?(PNG_MAGIC)
+            type = :png
+          elsif content.start_with?(AUDIO_MAGIC)
+            offset = content[AUDIO_MAGIC.size..AUDIO_MAGIC.size + 4].unpack1('N')
+            type = :audio
+            content = content[offset..content.size - 1]
+          elsif content.start_with?(VIDEO_MAGIC)
+            offset = content[VIDEO_MAGIC.size..VIDEO_MAGIC.size + 4].unpack1('N')
+            type = :video
+            content = content[offset..content.size - 1]
+          end
+          next if type.nil?
+
+          result << MobiResource.new(type, content)
+        end
+        result
       end
     end
 
@@ -360,10 +436,32 @@ module Dyck
         fdst_index = palmdb.records.size - kf8_boundary
         palmdb.records << (fdst_record = PalmDBRecord.new)
         @kf8.write_fdst(fdst_record)
-        @kf8.write(kf8_header, kf8_content_chunks.size, fdst_index)
+        @kf8.write(kf8_header, kf8_content_chunks.size, fdst_index, MobiData::MOBI_NOTSET)
       end
-      @kf7.write(kf7_header, kf7_content_chunks.size, 0)
+      image_start = write_resources(palmdb.records)
+      @kf7.write(kf7_header, kf7_content_chunks.size, 0, image_start)
       palmdb
+    end
+
+    private
+
+    # @param records [Array<Dyck::PalmDBRecord>]
+    # @return [Fixnum]
+    def write_resources(records) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength:
+      image_start = records.size
+      records.concat(@resources.map do |resource|
+        content = case resource.type
+                  when :audio
+                    AUDIO_MAGIC + [AUDIO_MAGIC.size + 4].pack('N') + resource.content
+                  when :video
+                    VIDEO_MAGIC + [VIDEO_MAGIC.size + 4].pack('N') + resource.content
+                  else
+                    resource.content
+                  end
+        PalmDBRecord.new(content: content)
+      end)
+      records << PalmDBRecord.new(content: BOUNDARY_MAGIC)
+      image_start
     end
   end
 end
