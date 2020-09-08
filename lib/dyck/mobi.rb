@@ -193,16 +193,16 @@ module Dyck
         magic = io.read(4)
         raise ArgumentError, %(Unsupported magic: #{magic}) if magic != MOBI_MAGIC
 
-        mobi_header_length = io.read(4).unpack1('N') - 8
-        mobi_header = StringIO.new(io.read(mobi_header_length))
-        mobi_data.mobi_type, mobi_data.text_encoding, _uid, mobi_data.version, = mobi_header.read(21 * 4).unpack('N*')
+        mobi_header_length = io.read(4).unpack1('N')
+        mobi_header = StringIO.new(io.read(mobi_header_length - 8))
+        mobi_data.mobi_type, mobi_data.text_encoding, _uid, mobi_data.version, = mobi_header.read(20 * 4).unpack('N*')
 
         unless SUPPORTED_TEXT_ENCODINGS.include?(mobi_data.text_encoding)
           raise ArgumentError, %(Unsupported text encoding: #{mobi_data.text_encoding})
         end
 
         # there are more fields here
-        image_index, = mobi_header.read(21 * 4)&.unpack('N')
+        _min_version, image_index, = mobi_header.read(22 * 4)&.unpack('N*')
         # there are more fields here
         if mobi_data.version >= 8
           fdst_index = mobi_header.read(4)&.unpack1('N')
@@ -280,13 +280,15 @@ module Dyck
     # @param fdst_section_count [Fixnum]
     # @param image_index [Fixnum]
     def write_mobi_header(io, fdst_index, fdst_section_count, image_index)
-      header_length = 184
+      header_length = 228
       uid = 0
       io.write([MOBI_MAGIC, header_length, @mobi_type, @text_encoding, uid, @version]
-                   .concat([MOBI_NOTSET] * 17)
-                   .concat([image_index])
+                   .concat([MOBI_NOTSET] * 16)
+                   .concat([@version, image_index])
                    .concat([MOBI_NOTSET] * 20)
                    .concat([fdst_index || 0, fdst_section_count])
+                   .concat([MOBI_NOTSET] * 10)
+                   .concat([0])
                    .pack(%(A#{MOBI_MAGIC.bytesize}N*)))
     end
 
@@ -442,6 +444,7 @@ module Dyck
       palmdb.records << (kf7_header = PalmDBRecord.new)
       kf7_content_chunks, kf7_text_length = @kf7.content_chunks
       palmdb.records.concat(kf7_content_chunks)
+      image_start = write_resources(palmdb.records)
       exth_records = [
         ExthRecord.new(tag: ExthRecord::TITLE, data: @title),
         ExthRecord.new(tag: ExthRecord::AUTHOR, data: @author),
@@ -466,7 +469,6 @@ module Dyck
         # Only KF7 needs this
         exth_records << ExthRecord.new(tag: ExthRecord::KF8_BOUNDARY, data: [kf8_boundary].pack('N'))
       end
-      image_start = write_resources(palmdb.records)
       @kf7.write(kf7_header, kf7_text_length, kf7_content_chunks.size, 0, image_start, exth_records)
       palmdb
     end
