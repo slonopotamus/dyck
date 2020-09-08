@@ -20,8 +20,8 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.kf7.exth_records[2].data).to eq('Sarah White')
   end
 
-  it 'has KF7 content' do
-    expect(subject.kf7.content.size).to eq(15_928)
+  it 'has KF7 flow' do
+    expect(subject.kf7.flow[0].size).to eq(15_928)
   end
 
   it 'has KF8 header' do
@@ -36,8 +36,10 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.kf8.exth_records[2].data).to eq('Sarah White')
   end
 
-  it 'has KF8 content' do
-    expect(subject.kf8.content.size).to eq(53_516)
+  it 'has KF8 flow' do
+    expect(subject.kf8.flow.size).to eq(6)
+    expect(subject.kf8.flow[0].size).to eq(20_169)
+    expect(subject.kf8.flow[5].size).to eq(44)
   end
 end
 
