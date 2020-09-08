@@ -231,10 +231,9 @@ module Dyck
     # @param text_record_count [Fixnum]
     # @param fdst_index [Fixnum]
     # @param image_index [Fixnum]
-    def write(header_record, text_record_count, fdst_index, image_index)
+    def write(header_record, text_length, text_record_count, fdst_index, image_index)
       io = StringIO.new
       io.binmode
-      text_length = 0 # TODO
       io.write([compression, 0, text_length, text_record_count, MAX_RECORD_SIZE, encryption, 0].pack('nnNn*'))
 
       write_mobi_header(io, fdst_index, @flow.size, image_index)
@@ -265,11 +264,11 @@ module Dyck
       @exth_records.detect { |record| record.tag == tag }
     end
 
-    # @return [Array<Dyck::PalmDBRecord]
     def content_chunks
-      @flow.join.bytes.each_slice(MobiData::MAX_RECORD_SIZE).map do |chunk|
+      bytes = @flow.join.bytes
+      [bytes.each_slice(MobiData::MAX_RECORD_SIZE).map do |chunk|
         PalmDBRecord.new(content: chunk.pack('c*'))
-      end
+      end, bytes.size]
     end
 
     # @param fdst_record [Dyck::PalmDBRecord]
@@ -425,21 +424,23 @@ module Dyck
     def to_palmdb # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
       palmdb = PalmDB.new(type: TYPE_MAGIC, creator: CREATOR_MAGIC)
       palmdb.records << (kf7_header = PalmDBRecord.new)
-      palmdb.records.concat(kf7_content_chunks = @kf7.content_chunks)
+      kf7_content_chunks, kf7_text_length = @kf7.content_chunks
+      palmdb.records.concat(kf7_content_chunks)
 
       @kf7.remove_exth(ExthRecord::KF8_BOUNDARY)
       if @kf8
         kf8_boundary = palmdb.records.size
         @kf7.set_exth(ExthRecord::KF8_BOUNDARY, [kf8_boundary].pack('N'))
         palmdb.records << (kf8_header = PalmDBRecord.new)
-        palmdb.records.concat(kf8_content_chunks = @kf8.content_chunks)
+        kf8_content_chunks, kf8_text_length = @kf8.content_chunks
+        palmdb.records.concat(kf8_content_chunks)
         fdst_index = palmdb.records.size - kf8_boundary
         palmdb.records << (fdst_record = PalmDBRecord.new)
         @kf8.write_fdst(fdst_record)
-        @kf8.write(kf8_header, kf8_content_chunks.size, fdst_index, MobiData::MOBI_NOTSET)
+        @kf8.write(kf8_header, kf8_text_length, kf8_content_chunks.size, fdst_index, MobiData::MOBI_NOTSET)
       end
       image_start = write_resources(palmdb.records)
-      @kf7.write(kf7_header, kf7_content_chunks.size, 0, image_start)
+      @kf7.write(kf7_header, kf7_text_length, kf7_content_chunks.size, 0, image_start)
       palmdb
     end
 
