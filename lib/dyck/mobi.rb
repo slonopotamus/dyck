@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'dyck/palmdb'
+require 'time'
 
 module Dyck
   MobiResource = Struct.new(:type, :content)
@@ -9,10 +10,11 @@ module Dyck
   class ExthRecord
     AUTHOR = 100
     PUBLISHER = 101
+    DESCRIPTION = 103
     SUBJECT = 105
+    PUBLISHING_DATE = 106
     KF8_BOUNDARY = 121
 
-    # TODO: constants for tag types
     attr_reader(:tag)
     attr_accessor(:data)
 
@@ -351,14 +353,21 @@ module Dyck
     attr_accessor(:author)
     # @return [String]
     attr_accessor(:publisher)
+    # @return [String]
+    attr_accessor(:description)
     # @return [Array<String>]
     attr_accessor(:subjects)
+    # @return [Time]
+    attr_accessor(:publishing_date)
 
     # @param kf7 [Dyck::MobiData]
     # @param kf8 [Dyck::MobiData, nil]
     # @param resources [Array<Dyck::MobiResource>]
     # @param author [String]
     # @param publisher [String]
+    # @param description [String]
+    # @param subjects [Array<String>]
+    # @param publishing_date [Time]
     def initialize( # rubocop:disable Metrics/ParameterLists
       kf7: MobiData.new,
       kf8: nil,
@@ -366,7 +375,9 @@ module Dyck
       title: ''.b,
       author: ''.b,
       publisher: ''.b,
-      subjects: []
+      description: ''.b,
+      subjects: [],
+      publishing_date: Time.now
     )
       @kf7 = kf7
       @kf8 = kf8
@@ -374,7 +385,9 @@ module Dyck
       @title = title
       @author = author
       @publisher = publisher
+      @description = description
       @subjects = subjects
+      @publishing_date = publishing_date
     end
 
     class << self
@@ -405,6 +418,8 @@ module Dyck
 
         exth_records = kf8_exth_records || kf7_exth_records || []
         resources = read_resources(palmdb.records, image_index)
+
+        publishing_date = ExthRecord.find(ExthRecord::PUBLISHING_DATE, exth_records)&.data
         Mobi.new(
           kf7: kf7,
           kf8: kf8,
@@ -412,7 +427,9 @@ module Dyck
           author: ExthRecord.find(ExthRecord::AUTHOR, exth_records)&.data || ''.b,
           title: kf8_full_name || kf7_full_name || ''.b,
           publisher: ExthRecord.find(ExthRecord::PUBLISHER, exth_records)&.data || ''.b,
-          subjects: exth_records.select {|r| r.tag == ExthRecord::SUBJECT }.map {|r| r.data }
+          description: ExthRecord.find(ExthRecord::DESCRIPTION, exth_records)&.data || ''.b,
+          subjects: exth_records.select { |r| r.tag == ExthRecord::SUBJECT }.map(&:data),
+          publishing_date: publishing_date.nil? ? Time.now : Time.iso8601(publishing_date)
         )
       end
 
@@ -474,7 +491,9 @@ module Dyck
       image_start = write_resources(palmdb.records)
       exth_records = [
         ExthRecord.new(tag: ExthRecord::AUTHOR, data: @author),
-        ExthRecord.new(tag: ExthRecord::PUBLISHER, data: @publisher)
+        ExthRecord.new(tag: ExthRecord::PUBLISHER, data: @publisher),
+        ExthRecord.new(tag: ExthRecord::DESCRIPTION, data: @description),
+        ExthRecord.new(tag: ExthRecord::PUBLISHING_DATE, data: @publishing_date.utc.iso8601)
       ]
       exth_records += @subjects.map { |s| ExthRecord.new(tag: ExthRecord::SUBJECT, data: s) }
 

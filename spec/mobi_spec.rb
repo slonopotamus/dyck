@@ -20,8 +20,17 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.publisher).to eq('Asciidoctor')
   end
 
+  it 'has description' do
+    expect(subject.description).to eq('This guide describes the Asciidoctor attributes, values, and layout options' \
+      ' available for producing a customized and polished document.')
+  end
+
   it 'has subjects' do
     expect(subject.subjects).to eq(%w[AsciiDoc Asciidoctor syntax reference])
+  end
+
+  it 'has publishing date' do
+    expect(subject.publishing_date).to eq(Time.iso8601('2014-04-14T21:00:00Z'))
   end
 
   it 'has KF7 header' do
