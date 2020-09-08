@@ -9,6 +9,7 @@ module Dyck
   class ExthRecord
     AUTHOR = 100
     PUBLISHER = 101
+    SUBJECT = 105
     KF8_BOUNDARY = 121
 
     # TODO: constants for tag types
@@ -350,19 +351,30 @@ module Dyck
     attr_accessor(:author)
     # @return [String]
     attr_accessor(:publisher)
+    # @return [Array<String>]
+    attr_accessor(:subjects)
 
     # @param kf7 [Dyck::MobiData]
     # @param kf8 [Dyck::MobiData, nil]
     # @param resources [Array<Dyck::MobiResource>]
     # @param author [String]
     # @param publisher [String]
-    def initialize(kf7: MobiData.new, kf8: nil, resources: [], title: ''.b, author: ''.b, publisher: ''.b) # rubocop:disable Metrics/ParameterLists
+    def initialize( # rubocop:disable Metrics/ParameterLists
+      kf7: MobiData.new,
+      kf8: nil,
+      resources: [],
+      title: ''.b,
+      author: ''.b,
+      publisher: ''.b,
+      subjects: []
+    )
       @kf7 = kf7
       @kf8 = kf8
       @resources = resources
       @title = title
       @author = author
       @publisher = publisher
+      @subjects = subjects
     end
 
     class << self
@@ -399,7 +411,8 @@ module Dyck
           resources: resources,
           author: ExthRecord.find(ExthRecord::AUTHOR, exth_records)&.data || ''.b,
           title: kf8_full_name || kf7_full_name || ''.b,
-          publisher: ExthRecord.find(ExthRecord::PUBLISHER, exth_records)&.data || ''.b
+          publisher: ExthRecord.find(ExthRecord::PUBLISHER, exth_records)&.data || ''.b,
+          subjects: exth_records.select {|r| r.tag == ExthRecord::SUBJECT }.map {|r| r.data }
         )
       end
 
@@ -463,6 +476,8 @@ module Dyck
         ExthRecord.new(tag: ExthRecord::AUTHOR, data: @author),
         ExthRecord.new(tag: ExthRecord::PUBLISHER, data: @publisher)
       ]
+      exth_records += @subjects.map { |s| ExthRecord.new(tag: ExthRecord::SUBJECT, data: s) }
+
       if @kf8
         kf8_boundary = palmdb.records.size
         palmdb.records << (kf8_header = PalmDBRecord.new)
