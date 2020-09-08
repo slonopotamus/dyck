@@ -7,19 +7,30 @@ module Dyck
 
   # A single EXTH metadata record
   class ExthRecord
+    TITLE = 99
+    AUTHOR = 100
+    PUBLISHER = 101
     KF8_BOUNDARY = 121
 
     # TODO: constants for tag types
     attr_reader(:tag)
     attr_accessor(:data)
 
-    def initialize(tag: 1, data: '')
+    def initialize(tag: 0, data: ''.b)
       @tag = tag
       @data = data
     end
 
     def data_uint32
       @data.unpack1('N')
+    end
+
+    class << self
+      # @param tag [Fixnum]
+      # @param records [Array<Dyck::ExthRecord>]
+      def find(tag, records)
+        records.detect { |record| record.tag == tag }
+      end
     end
   end
 
@@ -54,8 +65,6 @@ module Dyck
     attr_accessor(:mobi_type)
     attr_accessor(:text_encoding)
     attr_accessor(:version)
-    # @return [Array<Dyck::ExthRecord>]
-    attr_reader(:exth_records)
     # @return [Array<String>]
     attr_accessor(:flow)
 
@@ -65,7 +74,6 @@ module Dyck
       mobi_type: 2,
       text_encoding: TEXT_ENCODING_UTF8,
       version: 6,
-      exth_records: [],
       flow: []
     )
       @compression = compression
@@ -73,12 +81,12 @@ module Dyck
       @mobi_type = mobi_type
       @text_encoding = text_encoding
       @version = version
-      @exth_records = exth_records
       @flow = flow
     end
 
     class << self
       # @param records [Array<Dyck::PalmDBRecord>]
+      # @param index [Fixnum]
       def read(records, index) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
         io = StringIO.new(records[index].content)
         io.binmode
@@ -94,13 +102,13 @@ module Dyck
         end
 
         extra_flags, fdst_index, fdst_section_count, image_index = read_mobi_header(result, io)
-        result.exth_records.concat(read_exth_header(io))
+        exth_records = read_exth_header(io)
 
         content = read_content(index + 1, text_record_count, records, extra_flags)
         fdst = read_fdst(fdst_index, index, records, fdst_section_count)
         result.flow = reconstruct_flow(content, fdst)
 
-        [result, image_index]
+        [result, image_index, exth_records]
       end
 
       private
@@ -228,40 +236,20 @@ module Dyck
     end
 
     # @param header_record [Dyck::PalmDBRecord]
+    # @param text_length [Fixnum]
     # @param text_record_count [Fixnum]
     # @param fdst_index [Fixnum]
     # @param image_index [Fixnum]
-    def write(header_record, text_length, text_record_count, fdst_index, image_index)
+    # @param exth_records [Array<Dyck::ExthRecord>]
+    def write(header_record, text_length, text_record_count, fdst_index, image_index, exth_records) # rubocop:disable Metrics/ParameterLists
       io = StringIO.new
       io.binmode
       io.write([compression, 0, text_length, text_record_count, MAX_RECORD_SIZE, encryption, 0].pack('nnNn*'))
 
       write_mobi_header(io, fdst_index, @flow.size, image_index)
-      write_exth_header(io)
+      write_exth_header(io, exth_records)
 
       header_record.content = io.string
-    end
-
-    # @param tag [Fixnum]
-    # @param data [String]
-    def set_exth(tag, data)
-      record = find_exth(tag)
-      if record.nil?
-        @exth_records << ExthRecord.new(tag: tag, data: data)
-      else
-        record.data = data
-      end
-    end
-
-    # @param tag [Fixnum]
-    def remove_exth(tag)
-      @exth_records.reject! { |record| record.tag == tag }
-    end
-
-    # @param tag [Fixnum]
-    # @return [Dyck::ExthRecord, nil]
-    def find_exth(tag)
-      @exth_records.detect { |record| record.tag == tag }
     end
 
     def content_chunks
@@ -303,15 +291,16 @@ module Dyck
     end
 
     # @param io [IO, StringIO]
-    def write_exth_header(io)
+    # @param exth_records [Array<Dyck::ExthRecord>]
+    def write_exth_header(io, exth_records)
       io.write(EXTH_MAGIC)
 
       exth_header_length = 12
-      @exth_records.each do |exth_record|
+      exth_records.each do |exth_record|
         exth_header_length += exth_record.data.bytesize + 8
       end
-      io.write([exth_header_length, @exth_records.size].pack('N*'))
-      @exth_records.each do |exth_record|
+      io.write([exth_header_length, exth_records.size].pack('N*'))
+      exth_records.each do |exth_record|
         io.write([exth_record.tag, exth_record.data.bytesize + 8, exth_record.data].pack('NNa*'))
       end
     end
@@ -339,14 +328,25 @@ module Dyck
     attr_accessor(:kf8)
     # @return [Array<Dyck::MobiResource>]
     attr_accessor(:resources)
+    # @return [String]
+    attr_accessor(:title)
+    # @return [String]
+    attr_accessor(:author)
+    # @return [String]
+    attr_accessor(:publisher)
 
     # @param kf7 [Dyck::MobiData]
     # @param kf8 [Dyck::MobiData, nil]
     # @param resources [Array<Dyck::MobiResource>]
-    def initialize(kf7: MobiData.new, kf8: nil, resources: [])
+    # @param author [String]
+    # @param publisher [String]
+    def initialize(kf7: MobiData.new, kf8: nil, resources: [], title: ''.b, author: ''.b, publisher: ''.b) # rubocop:disable Metrics/ParameterLists
       @kf7 = kf7
       @kf8 = kf8
       @resources = resources
+      @title = title
+      @author = author
+      @publisher = publisher
     end
 
     class << self
@@ -358,17 +358,33 @@ module Dyck
 
       # @param palmdb [Dyck::PalmDB]
       # @return [Dyck::Mobi]
-      def from_palmdb(palmdb) # rubocop:disable Metrics/AbcSize
+      def from_palmdb(palmdb) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
         raise ArgumentError, %(Unsupported type: #{palmdb.type}) if palmdb.type != TYPE_MAGIC
         raise ArgumentError, %(Unsupported creator: #{palmdb.type}) if palmdb.creator != CREATOR_MAGIC
 
-        kf7, image_index = palmdb.records.empty? ? MobiData.new : MobiData.read(palmdb.records, 0)
+        kf7, image_index, kf7_exth_records = if palmdb.records.empty?
+                                               [MobiData.new, nil, []]
+                                             else
+                                               MobiData.read(palmdb.records, 0)
+                                             end
 
-        kf8_boundary = kf7.find_exth(ExthRecord::KF8_BOUNDARY)
-        kf8, = kf8_boundary.nil? ? [nil, nil] : MobiData.read(palmdb.records, kf8_boundary.data_uint32)
+        kf8_boundary = ExthRecord.find(ExthRecord::KF8_BOUNDARY, kf7_exth_records)
+        kf8, _, kf8_exth_records = if kf8_boundary.nil?
+                                     [nil, nil, nil]
+                                   else
+                                     MobiData.read(palmdb.records, kf8_boundary.data_uint32)
+                                   end
 
+        exth_records = kf8_exth_records || kf7_exth_records
         resources = read_resources(palmdb.records, image_index)
-        Mobi.new(kf7: kf7, kf8: kf8, resources: resources)
+        Mobi.new(
+          kf7: kf7,
+          kf8: kf8,
+          resources: resources,
+          author: ExthRecord.find(ExthRecord::AUTHOR, exth_records)&.data || ''.b,
+          title: ExthRecord.find(ExthRecord::TITLE, exth_records)&.data || ''.b,
+          publisher: ExthRecord.find(ExthRecord::PUBLISHER, exth_records)&.data || ''.b
+        )
       end
 
       private
@@ -426,21 +442,32 @@ module Dyck
       palmdb.records << (kf7_header = PalmDBRecord.new)
       kf7_content_chunks, kf7_text_length = @kf7.content_chunks
       palmdb.records.concat(kf7_content_chunks)
-
-      @kf7.remove_exth(ExthRecord::KF8_BOUNDARY)
+      exth_records = [
+        ExthRecord.new(tag: ExthRecord::TITLE, data: @title),
+        ExthRecord.new(tag: ExthRecord::AUTHOR, data: @author),
+        ExthRecord.new(tag: ExthRecord::PUBLISHER, data: @publisher)
+      ]
       if @kf8
         kf8_boundary = palmdb.records.size
-        @kf7.set_exth(ExthRecord::KF8_BOUNDARY, [kf8_boundary].pack('N'))
         palmdb.records << (kf8_header = PalmDBRecord.new)
         kf8_content_chunks, kf8_text_length = @kf8.content_chunks
         palmdb.records.concat(kf8_content_chunks)
         fdst_index = palmdb.records.size - kf8_boundary
         palmdb.records << (fdst_record = PalmDBRecord.new)
         @kf8.write_fdst(fdst_record)
-        @kf8.write(kf8_header, kf8_text_length, kf8_content_chunks.size, fdst_index, MobiData::MOBI_NOTSET)
+        @kf8.write(
+          kf8_header,
+          kf8_text_length,
+          kf8_content_chunks.size,
+          fdst_index,
+          MobiData::MOBI_NOTSET,
+          exth_records
+        )
+        # Only KF7 needs this
+        exth_records << ExthRecord.new(tag: ExthRecord::KF8_BOUNDARY, data: [kf8_boundary].pack('N'))
       end
       image_start = write_resources(palmdb.records)
-      @kf7.write(kf7_header, kf7_text_length, kf7_content_chunks.size, 0, image_start)
+      @kf7.write(kf7_header, kf7_text_length, kf7_content_chunks.size, 0, image_start, exth_records)
       palmdb
     end
 
