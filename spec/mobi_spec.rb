@@ -20,6 +20,10 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.publisher).to eq('Asciidoctor')
   end
 
+  it 'has subjects' do
+    expect(subject.subjects).to eq(%w[AsciiDoc Asciidoctor syntax reference])
+  end
+
   it 'has KF7 header' do
     expect(subject.kf7).not_to be_nil
     expect(subject.kf7.compression).to eq(Dyck::MobiData::NO_COMPRESSION)
