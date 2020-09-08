@@ -9,7 +9,7 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
   end
 
   it 'has title' do
-    expect(subject.title).to eq('')
+    expect(subject.title).to eq('Asciidoctor Playground: Sample Content')
   end
 
   it 'has author' do
