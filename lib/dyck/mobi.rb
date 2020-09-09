@@ -295,7 +295,7 @@ module Dyck
     # @param fdst_section_count [Fixnum]
     # @param image_index [Fixnum]
     def write_mobi_header(io, fdst_index, fdst_section_count, image_index, exth_size, full_name) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
-      header_length = 228
+      header_length = 264
       uid = 0
       io.write([MOBI_MAGIC, header_length, @mobi_type, @text_encoding, uid, @version]
                    .concat([MOBI_NOTSET] * 11)
@@ -308,6 +308,7 @@ module Dyck
                    .concat([fdst_index || 0, fdst_section_count])
                    .concat([MOBI_NOTSET] * 10)
                    .concat([0])
+                   .concat([MOBI_NOTSET] * 9)
                    .pack(%(A#{MOBI_MAGIC.bytesize}N*)))
     end
 
