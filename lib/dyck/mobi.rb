@@ -262,6 +262,7 @@ module Dyck
       write_mobi_header(io, fdst_index, @flow.size, image_index, exth_buf.size, full_name)
       io.write(exth_buf.string)
       io.write(full_name)
+      io.write("\0")
 
       header_record.content = io.string
     end
