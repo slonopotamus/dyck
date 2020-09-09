@@ -76,7 +76,7 @@ module Dyck
       encryption: NO_ENCRYPTION,
       mobi_type: 2,
       text_encoding: TEXT_ENCODING_UTF8,
-      version: 6,
+      version: 8,
       flow: []
     )
       @compression = compression
@@ -375,7 +375,7 @@ module Dyck
     # @param publishing_date [Time]
     # @param copyright [String]
     def initialize( # rubocop:disable Metrics/ParameterLists
-      kf7: MobiData.new,
+      kf7: MobiData.new(version: 6),
       kf8: nil,
       resources: [],
       title: ''.b,
@@ -412,7 +412,7 @@ module Dyck
         raise ArgumentError, %(Unsupported creator: #{palmdb.type}) if palmdb.creator != CREATOR_MAGIC
 
         kf7, image_index, kf7_exth_records, kf7_full_name = if palmdb.records.empty?
-                                                              [MobiData.new, nil, [], ''.b]
+                                                              [MobiData.new(version: 6), nil, [], ''.b]
                                                             else
                                                               MobiData.read(palmdb.records, 0)
                                                             end

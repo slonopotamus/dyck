@@ -56,7 +56,7 @@ mobi.description = "The book is the sailor Ishmael's narrative of the obsessive 
 mobi.kf7.flow << '<html><body>Book text in KF7 format</body></html>'
 
 # KF8 is optional
-mobi.kf8 = Dyck::MobiData.new(version: 8)
+mobi.kf8 = Dyck::MobiData.new
 mobi.kf8.flow << '<html><body>Book text in KF8 format</body></html>'
 
 # Write to file
