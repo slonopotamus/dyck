@@ -37,7 +37,33 @@ $ gem install dyck
 
 == Usage
 
-TODO
+[source,ruby]
+----
+require 'dyck'
+
+mobi = Dyck::Mobi.new
+
+# Fill file metadata
+mobi.title = 'Moby Dick'
+mobi.publishing_date = Time.parse('October 18, 1851')
+mobi.author = 'Herman Melville'
+mobi.subjects = %w[whale sea]
+mobi.description = "The book is the sailor Ishmael's narrative of the obsessive quest of Ahab," \
+  " captain of the whaling ship Pequod, for revenge on Moby Dick, the giant white sperm whale " \
+  "that on the ship's previous voyage bit off Ahab's leg at the knee."
+
+# Add text
+mobi.kf7.flow << '<html><body>Book text in KF7 format</body></html>'
+
+# KF8 is optional
+mobi.kf8 = Dyck::MobiData.new(version: 8)
+mobi.kf8.flow << '<html><body>Book text in KF8 format</body></html>'
+
+# Write to file
+File.open('mobi-dick.mobi', 'wb') do |f|
+  mobi.write(f)
+end
+----
 
 == Development
 
