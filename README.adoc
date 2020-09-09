@@ -37,6 +37,25 @@ $ gem install dyck
 
 == Usage
 
+Reading existing Mobi file:
+
+[source,ruby]
+----
+require 'dyck'
+
+f = File.open('book.mobi')
+mobi = Dyck::Mobi::read(f)
+
+# Access Mobi data
+mobi.title
+mobi.publishing_date
+mobi.author
+mobi.flow
+
+----
+
+Writing new Mobi file:
+
 [source,ruby]
 ----
 require 'dyck'
