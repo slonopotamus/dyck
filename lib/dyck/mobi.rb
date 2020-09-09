@@ -15,6 +15,11 @@ module Dyck
     PUBLISHING_DATE = 106
     RIGHTS = 109
     KF8_BOUNDARY = 121
+    CREATOR_SOFTWARE = 204
+    CREATOR_SOFTWARE_MAJOR = 205
+    CREATOR_SOFTWARE_MINOR = 206
+    CREATOR_SOFTWARE_BUILD = 207
+    CREATOR_SOFTWARE_REVISION = 535
 
     attr_reader(:tag)
     attr_accessor(:data)
@@ -498,12 +503,21 @@ module Dyck
       kf7_content_chunks, kf7_text_length = @kf7.content_chunks
       palmdb.records.concat(kf7_content_chunks)
       image_start = write_resources(palmdb.records)
+
       exth_records = [
         ExthRecord.new(tag: ExthRecord::AUTHOR, data: @author),
         ExthRecord.new(tag: ExthRecord::PUBLISHER, data: @publisher),
         ExthRecord.new(tag: ExthRecord::DESCRIPTION, data: @description),
         ExthRecord.new(tag: ExthRecord::PUBLISHING_DATE, data: @publishing_date.utc.iso8601),
-        ExthRecord.new(tag: ExthRecord::RIGHTS, data: @copyright)
+        ExthRecord.new(tag: ExthRecord::RIGHTS, data: @copyright),
+        ExthRecord.new(tag: ExthRecord::CREATOR_SOFTWARE, data: [201].pack('N')),
+        ExthRecord.new(tag: ExthRecord::CREATOR_SOFTWARE_MAJOR, data: [2].pack('N')),
+        ExthRecord.new(tag: ExthRecord::CREATOR_SOFTWARE_MINOR, data: [9].pack('N')),
+        ExthRecord.new(tag: ExthRecord::CREATOR_SOFTWARE_BUILD, data: [0].pack('N')),
+        ExthRecord.new(
+          tag: ExthRecord::CREATOR_SOFTWARE_REVISION,
+          data: %(Dyck #{Dyck::VERSION} [https://github.com/slonopotamus/dyck])
+        )
       ]
       exth_records += @subjects.map { |s| ExthRecord.new(tag: ExthRecord::SUBJECT, data: s) }
 
