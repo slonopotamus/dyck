@@ -250,7 +250,7 @@ module Dyck
     # @param fdst_index [Fixnum]
     # @param image_index [Fixnum]
     # @param exth_records [Array<Dyck::ExthRecord>]
-    def write(header_record, text_length, text_record_count, fdst_index, image_index, exth_records, full_name) # rubocop:disable Metrics/AbcSize, Metrics/ParameterLists
+    def write(header_record, text_length, text_record_count, fdst_index, image_index, exth_records, full_name) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
       io = StringIO.new
       io.binmode
       io.write([compression, 0, text_length, text_record_count, MAX_RECORD_SIZE, encryption, 0].pack('nnNn*'))
