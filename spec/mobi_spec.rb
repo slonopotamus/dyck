@@ -89,7 +89,7 @@ describe 'copy created by Dyck' do
   it_behaves_like 'sample Mobi'
 end
 
-describe 'empty Mobi' do
+describe 'empty MOBI6' do
   subject { Dyck::Mobi.new }
 
   it 'does not change after save/load' do
@@ -105,7 +105,7 @@ describe 'empty Mobi' do
   end
 end
 
-describe 'empty KF8 Mobi' do
+describe 'empty MOBI6+KF8' do
   subject do
     mobi = Dyck::Mobi.new
     mobi.kf8 = Dyck::MobiData.new(version: 8)
@@ -116,6 +116,22 @@ describe 'empty KF8 Mobi' do
 
   it 'has MOBI6 header with KF8 boundary' do
     expect(subject.mobi6).not_to be_nil
+  end
+
+  it 'has KF8 header' do
+    expect(subject.kf8).not_to be_nil
+    expect(subject.kf8.version).to eq(8)
+  end
+end
+
+describe 'empty KF8' do
+  subject do
+    mobi = Dyck::Mobi.new
+    mobi.mobi6 = nil
+    mobi.kf8 = Dyck::MobiData.new(version: 8)
+    io = mobi.write(StringIO.new)
+    io.seek(0)
+    Dyck::Mobi.read(io)
   end
 
   it 'has KF8 header' do
