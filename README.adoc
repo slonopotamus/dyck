@@ -50,7 +50,9 @@ mobi = Dyck::Mobi::read(f)
 mobi.title
 mobi.publishing_date
 mobi.author
-mobi.flow
+mobi.mobi6.flow # Document text in MOBI6 format
+mobi.kf8.flow # Document text in KF8 format
+mobi.resources # Images, fonts, audio, video
 
 ----
 
