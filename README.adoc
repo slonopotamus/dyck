@@ -73,8 +73,10 @@ mobi.description = "The book is the sailor Ishmael's narrative of the obsessive 
 
 # Add text
 mobi.mobi6.flow << '<html><body>Book text in MOBI6 format</body></html>'
+# Or, remove MOBI6 part if you don't want it
+#mobi.mobi6 = nil
 
-# KF8 is optional
+# KF8 is optional, add it if you want to
 mobi.kf8 = Dyck::MobiData.new
 mobi.kf8.flow << '<html><body>Book text in KF8 format</body></html>'
 
