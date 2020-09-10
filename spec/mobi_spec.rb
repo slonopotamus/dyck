@@ -37,17 +37,17 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.copyright).to eq('CC-BY-SA 3.0')
   end
 
-  it 'has KF7 header' do
-    expect(subject.kf7).not_to be_nil
-    expect(subject.kf7.compression).to eq(Dyck::MobiData::NO_COMPRESSION)
-    expect(subject.kf7.encryption).to eq(Dyck::MobiData::NO_ENCRYPTION)
-    expect(subject.kf7.mobi_type).to eq(2)
-    expect(subject.kf7.text_encoding).to eq(Dyck::MobiData::TEXT_ENCODING_UTF8)
-    expect(subject.kf7.version).to eq(6)
+  it 'has MOBI6 header' do
+    expect(subject.mobi6).not_to be_nil
+    expect(subject.mobi6.compression).to eq(Dyck::MobiData::NO_COMPRESSION)
+    expect(subject.mobi6.encryption).to eq(Dyck::MobiData::NO_ENCRYPTION)
+    expect(subject.mobi6.mobi_type).to eq(2)
+    expect(subject.mobi6.text_encoding).to eq(Dyck::MobiData::TEXT_ENCODING_UTF8)
+    expect(subject.mobi6.version).to eq(6)
   end
 
-  it 'has KF7 flow' do
-    expect(subject.kf7.flow[0].size).to eq(15_928)
+  it 'has MOBI6 flow' do
+    expect(subject.mobi6.flow[0].size).to eq(15_928)
   end
 
   it 'has KF8 header' do
@@ -100,8 +100,8 @@ describe 'empty Mobi' do
     expect(Marshal.dump(mobi)).to eq(Marshal.dump(subject))
   end
 
-  it 'has KF7 header' do
-    expect(subject.kf7).not_to be_nil
+  it 'has MOBI6 header' do
+    expect(subject.mobi6).not_to be_nil
   end
 end
 
@@ -114,8 +114,8 @@ describe 'empty KF8 Mobi' do
     Dyck::Mobi.read(io)
   end
 
-  it 'has KF7 header with KF8 boundary' do
-    expect(subject.kf7).not_to be_nil
+  it 'has MOBI6 header with KF8 boundary' do
+    expect(subject.mobi6).not_to be_nil
   end
 
   it 'has KF8 header' do

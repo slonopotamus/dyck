@@ -42,7 +42,7 @@ module Dyck
     end
   end
 
-  # A single KF7/KF8 data
+  # A single MOBI6/KF8 data
   class MobiData # rubocop:disable Metrics/ClassLength
     NO_COMPRESSION = 1
     PALMDOC_COMPRESSION = 2
@@ -221,7 +221,7 @@ module Dyck
         if mobi_data.version >= 8
           fdst_index = mobi_header.read(4)&.unpack1('N')
         else
-          # Assume that last_text_index is fdst_index for KF7
+          # Assume that last_text_index is fdst_index for MOBI6
           _, fdst_index = mobi_header.read(4)&.unpack('nn')
         end
         fdst_section_count = mobi_header.read(4)&.unpack1('N')
@@ -350,7 +350,7 @@ module Dyck
     VIDEO_MAGIC = 'VIDE'.b
 
     # @return [Dyck::MobiData]
-    attr_accessor(:kf7)
+    attr_accessor(:mobi6)
     # @return [Dyck::MobiData]
     attr_accessor(:kf8)
     # @return [Array<Dyck::MobiResource>]
@@ -370,7 +370,7 @@ module Dyck
     # @return [String]
     attr_accessor(:copyright)
 
-    # @param kf7 [Dyck::MobiData]
+    # @param mobi6 [Dyck::MobiData]
     # @param kf8 [Dyck::MobiData, nil]
     # @param resources [Array<Dyck::MobiResource>]
     # @param author [String]
@@ -380,7 +380,7 @@ module Dyck
     # @param publishing_date [Time]
     # @param copyright [String]
     def initialize( # rubocop:disable Metrics/ParameterLists
-      kf7: MobiData.new(version: 6),
+      mobi6: MobiData.new(version: 6),
       kf8: nil,
       resources: [],
       title: ''.b,
@@ -391,7 +391,7 @@ module Dyck
       publishing_date: Time.now.round,
       copyright: ''.b
     )
-      @kf7 = kf7
+      @mobi6 = mobi6
       @kf8 = kf8
       @resources = resources
       @title = title
@@ -416,29 +416,29 @@ module Dyck
         raise ArgumentError, %(Unsupported type: #{palmdb.type}) if palmdb.type != TYPE_MAGIC
         raise ArgumentError, %(Unsupported creator: #{palmdb.type}) if palmdb.creator != CREATOR_MAGIC
 
-        kf7, image_index, kf7_exth_records, kf7_full_name = if palmdb.records.empty?
-                                                              [MobiData.new(version: 6), nil, [], ''.b]
-                                                            else
-                                                              MobiData.read(palmdb.records, 0)
-                                                            end
+        mobi6, image_index, mobi6_exth_records, mobi6_full_name = if palmdb.records.empty?
+                                                                    [MobiData.new(version: 6), nil, [], ''.b]
+                                                                  else
+                                                                    MobiData.read(palmdb.records, 0)
+                                                                  end
 
-        kf8_boundary = ExthRecord.find(ExthRecord::KF8_BOUNDARY, kf7_exth_records)
+        kf8_boundary = ExthRecord.find(ExthRecord::KF8_BOUNDARY, mobi6_exth_records)
         kf8, _, kf8_exth_records, kf8_full_name = if kf8_boundary.nil?
                                                     [nil, nil, nil, nil]
                                                   else
                                                     MobiData.read(palmdb.records, kf8_boundary.data_uint32)
                                                   end
 
-        exth_records = kf8_exth_records || kf7_exth_records || []
+        exth_records = kf8_exth_records || mobi6_exth_records || []
         resources = read_resources(palmdb.records, image_index)
 
         publishing_date = ExthRecord.find(ExthRecord::PUBLISHING_DATE, exth_records)&.data
         Mobi.new(
-          kf7: kf7,
+          mobi6: mobi6,
           kf8: kf8,
           resources: resources,
           author: ExthRecord.find(ExthRecord::AUTHOR, exth_records)&.data || ''.b,
-          title: kf8_full_name || kf7_full_name || ''.b,
+          title: kf8_full_name || mobi6_full_name || ''.b,
           publisher: ExthRecord.find(ExthRecord::PUBLISHER, exth_records)&.data || ''.b,
           description: ExthRecord.find(ExthRecord::DESCRIPTION, exth_records)&.data || ''.b,
           subjects: exth_records.select { |r| r.tag == ExthRecord::SUBJECT }.map(&:data),
@@ -499,9 +499,9 @@ module Dyck
     # @return [Dyck::PalmDB]
     def to_palmdb # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
       palmdb = PalmDB.new(type: TYPE_MAGIC, creator: CREATOR_MAGIC)
-      palmdb.records << (kf7_header = PalmDBRecord.new)
-      kf7_content_chunks, kf7_text_length = @kf7.content_chunks
-      palmdb.records.concat(kf7_content_chunks)
+      palmdb.records << (mobi6_header = PalmDBRecord.new)
+      mobi6_content_chunks, mobi6_text_length = @mobi6.content_chunks
+      palmdb.records.concat(mobi6_content_chunks)
       image_start = write_resources(palmdb.records)
 
       exth_records = [
@@ -538,10 +538,10 @@ module Dyck
           exth_records,
           @title
         )
-        # Only KF7 needs this
+        # Only MOBI6 needs this
         exth_records << ExthRecord.new(tag: ExthRecord::KF8_BOUNDARY, data: [kf8_boundary].pack('N'))
       end
-      @kf7.write(kf7_header, kf7_text_length, kf7_content_chunks.size, 0, image_start, exth_records, @title)
+      @mobi6.write(mobi6_header, mobi6_text_length, mobi6_content_chunks.size, 0, image_start, exth_records, @title)
       palmdb
     end
 

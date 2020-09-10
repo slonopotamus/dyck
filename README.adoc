@@ -72,7 +72,7 @@ mobi.description = "The book is the sailor Ishmael's narrative of the obsessive 
   "that on the ship's previous voyage bit off Ahab's leg at the knee."
 
 # Add text
-mobi.kf7.flow << '<html><body>Book text in KF7 format</body></html>'
+mobi.mobi6.flow << '<html><body>Book text in MOBI6 format</body></html>'
 
 # KF8 is optional
 mobi.kf8 = Dyck::MobiData.new
