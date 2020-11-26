@@ -64,10 +64,15 @@ module Dyck
 
     MOBI_NOTSET = 0xffffffff
 
+    # @return Integer
     attr_accessor(:compression)
+    # @return Integer
     attr_accessor(:encryption)
+    # @return Integer
     attr_accessor(:mobi_type)
+    # @return Integer
     attr_accessor(:text_encoding)
+    # @return Integer
     attr_accessor(:version)
     # @return [Array<String>]
     attr_accessor(:flow)
