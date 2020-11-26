@@ -3,8 +3,11 @@
 module Dyck
   # A single data record within PalmDB file
   class PalmDBRecord
+    # @return [Integer]
     attr_accessor(:attributes)
+    # @return [Integer]
     attr_accessor(:uid)
+    # @return [String]
     attr_accessor(:content)
 
     def initialize(attributes: 0, uid: 0, content: '')
@@ -24,7 +27,9 @@ module Dyck
 
     # @return [String]
     attr_accessor(:name)
+    # @return [Integer]
     attr_accessor(:attributes)
+    # @return [Integer]
     attr_accessor(:version)
     # @return [Time]
     attr_accessor(:ctime)
@@ -32,14 +37,19 @@ module Dyck
     attr_accessor(:mtime)
     # @return [Time]
     attr_accessor(:btime)
+    # @return [Integer]
     attr_accessor(:mod_num)
+    # @return [Integer]
     attr_accessor(:appinfo_offset)
+    # @return [Integer]
     attr_accessor(:sortinfo_offset)
     # @return [String]
     attr_reader(:type)
     # @return [String]
     attr_reader(:creator)
+    # @return [Integer]
     attr_accessor(:uid)
+    # @return [Integer]
     attr_accessor(:next_rec)
     # @return [Array<Dyck::PalmDBRecord>]
     attr_reader(:records)
@@ -141,7 +151,7 @@ module Dyck
         offset += record.content.bytesize
       end
       # Write record contents
-      @records.each do |record|
+      @records.each do |record| # rubocop:disable Style/CombinableLoops
         io.write(record.content)
       end
       io
