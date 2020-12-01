@@ -105,7 +105,6 @@ module Dyck
       encryption: NO_ENCRYPTION,
       mobi_type: 2,
       text_encoding: TEXT_ENCODING_UTF8,
-      version: 8,
       flow: [],
       parts: []
     )
@@ -113,7 +112,6 @@ module Dyck
       @encryption = encryption
       @mobi_type = mobi_type
       @text_encoding = text_encoding
-      @version = version
       @flow = flow
       @parts = parts
     end
@@ -135,7 +133,6 @@ module Dyck
         mobi_header = read_mobi_header(io)
         result.mobi_type = mobi_header.mobi_type
         result.text_encoding = mobi_header.text_encoding
-        result.version = mobi_header.version
         exth_records = read_exth_header(io)
 
         if set?(mobi_header.full_name_offset)
@@ -151,7 +148,7 @@ module Dyck
         skel = MobiData.set?(mobi_header.skel_index) ? Index.read(records[mobi_header.skel_index..-1], 'skel') : nil
         frag = MobiData.set?(mobi_header.frag_index) ? Index.read(records[mobi_header.frag_index..-1], 'frag') : nil
         result.parts = reconstruct_parts(result.flow, skel, frag)
-        [result, mobi_header.image_index, exth_records, full_name]
+        [result, mobi_header.version, mobi_header.image_index, exth_records, full_name]
       end
 
       # @param field [Integer, nil]
@@ -311,6 +308,7 @@ module Dyck
       end
     end
 
+    # @param version [Number]
     # @param header_record [Dyck::PalmDBRecord]
     # @param text_length [Integer]
     # @param text_record_count [Integer]
@@ -321,6 +319,7 @@ module Dyck
     # @param skel_index [Integer]
     # @param frag_index [Integer]
     def write( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
+      version,
       header_record,
       text_length,
       text_record_count,
@@ -339,7 +338,17 @@ module Dyck
       exth_buf = StringIO.new
       exth_buf.binmode
       write_exth_header(exth_buf, exth_records)
-      write_mobi_header(io, fdst_index, flow.size, image_index, exth_buf.size, full_name, skel_index, frag_index)
+      write_mobi_header(
+        version,
+        io,
+        fdst_index,
+        flow.size,
+        image_index,
+        exth_buf.size,
+        full_name,
+        skel_index,
+        frag_index
+      )
       io.write(exth_buf.string)
       io.write(full_name)
       io.write("\0")
@@ -372,6 +381,7 @@ module Dyck
 
     private
 
+    # @param version [Number]
     # @param io [IO, StringIO]
     # @param fdst_index [Integer]
     # @param fdst_section_count [Integer]
@@ -380,6 +390,7 @@ module Dyck
     # @param frag_index [Integer]
     # @return [void]
     def write_mobi_header( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
+      version,
       io,
       fdst_index,
       fdst_section_count,
@@ -391,11 +402,11 @@ module Dyck
     )
       header_length = 264
       uid = 0
-      io.write([MOBI_MAGIC, header_length, @mobi_type, @text_encoding, uid, @version]
+      io.write([MOBI_MAGIC, header_length, @mobi_type, @text_encoding, uid, version]
                    .concat([MOBI_NOTSET] * 11)
                    .concat([16 + header_length + exth_size, full_name.size])
                    .concat([MOBI_NOTSET] * 3)
-                   .concat([@version, image_index])
+                   .concat([version, image_index])
                    .concat([MOBI_NOTSET] * 4)
                    .concat([0x40]) # EXTH flags
                    .concat([MOBI_NOTSET] * 15)
@@ -472,7 +483,7 @@ module Dyck
     # @param publishing_date [Time]
     # @param copyright [String]
     def initialize( # rubocop:disable Metrics/ParameterLists
-      mobi6: MobiData.new(version: 6),
+      mobi6: nil,
       kf8: nil,
       resources: [],
       title: ''.b,
@@ -508,13 +519,13 @@ module Dyck
         raise ArgumentError, %(Unsupported PalmBD type: #{palmdb.type}) if palmdb.type != TYPE_MAGIC
         raise ArgumentError, %(Unsupported PalmBD creator: #{palmdb.type}) if palmdb.creator != CREATOR_MAGIC
 
-        mobi6, image_index, exth_records, full_name = if palmdb.records.empty?
-                                                        [MobiData.new(version: 6), nil, [], ''.b]
-                                                      else
-                                                        MobiData.read(palmdb.records)
-                                                      end
+        mobi6, mobi6_version, image_index, exth_records, full_name = if palmdb.records.empty?
+                                                                       [MobiData.new, 8, nil, [], ''.b]
+                                                                     else
+                                                                       MobiData.read(palmdb.records)
+                                                                     end
 
-        if mobi6.version >= 8
+        if mobi6_version >= 8
           # KF8-only file
           kf8 = mobi6
           mobi6 = nil
@@ -526,7 +537,7 @@ module Dyck
           else
             # MOBI6 + KF8 hybrid file
             kf8_offset = kf8_boundary.data.unpack1('N')
-            kf8, _kf8_image_index, exth_records, _kf8_full_name = MobiData.read(palmdb.records[kf8_offset..-1])
+            kf8, _, _, exth_records, = MobiData.read(palmdb.records[kf8_offset..-1])
           end
         end
 
@@ -654,6 +665,7 @@ module Dyck
         palmdb.records.concat(frag.write)
 
         @kf8.write(
+          8,
           kf8_header,
           kf8_text_length,
           kf8_content_chunks.size,
@@ -670,6 +682,7 @@ module Dyck
       end
 
       @mobi6&.write(
+        6,
         mobi6_header,
         mobi6_text_length,
         mobi6_content_chunks.size,

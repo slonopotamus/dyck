@@ -43,7 +43,6 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.mobi6.encryption).to eq(Dyck::MobiData::NO_ENCRYPTION)
     expect(subject.mobi6.mobi_type).to eq(2)
     expect(subject.mobi6.text_encoding).to eq(Dyck::MobiData::TEXT_ENCODING_UTF8)
-    expect(subject.mobi6.version).to eq(6)
   end
 
   it 'has MOBI6 part' do
@@ -57,7 +56,6 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.kf8.encryption).to eq(Dyck::MobiData::NO_ENCRYPTION)
     expect(subject.kf8.mobi_type).to eq(2)
     expect(subject.kf8.text_encoding).to eq(Dyck::MobiData::TEXT_ENCODING_UTF8)
-    expect(subject.kf8.version).to eq(8)
   end
 
   it 'has KF8 flow' do
@@ -99,7 +97,7 @@ describe 'copy created by Dyck' do
 end
 
 describe 'empty MOBI6' do
-  subject { Dyck::Mobi.new }
+  subject { Dyck::Mobi.new(mobi6: Dyck::MobiData.new) }
 
   it 'does not change after save/load' do
     io = subject.write(StringIO.new)
@@ -116,8 +114,7 @@ end
 
 describe 'empty MOBI6+KF8' do
   subject do
-    mobi = Dyck::Mobi.new
-    mobi.kf8 = Dyck::MobiData.new(version: 8)
+    mobi = Dyck::Mobi.new(mobi6: Dyck::MobiData.new, kf8: Dyck::MobiData.new)
     io = mobi.write(StringIO.new)
     io.seek(0)
     Dyck::Mobi.read(io)
@@ -129,15 +126,12 @@ describe 'empty MOBI6+KF8' do
 
   it 'has KF8 header' do
     expect(subject.kf8).not_to be_nil
-    expect(subject.kf8.version).to eq(8)
   end
 end
 
 describe 'empty KF8' do
   subject do
-    mobi = Dyck::Mobi.new
-    mobi.mobi6 = nil
-    mobi.kf8 = Dyck::MobiData.new(version: 8)
+    mobi = Dyck::Mobi.new(kf8: Dyck::MobiData.new)
     io = mobi.write(StringIO.new)
     io.seek(0)
     Dyck::Mobi.read(io)
@@ -145,6 +139,5 @@ describe 'empty KF8' do
 
   it 'has KF8 header' do
     expect(subject.kf8).not_to be_nil
-    expect(subject.kf8.version).to eq(8)
   end
 end

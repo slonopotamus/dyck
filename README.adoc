@@ -50,8 +50,8 @@ mobi = Dyck::Mobi::read(f)
 mobi.title
 mobi.publishing_date
 mobi.author
-mobi.mobi6.flow # Document text in MOBI6 format
-mobi.kf8.flow # Document text in KF8 format
+mobi.mobi6.parts # Document text in MOBI6 format
+mobi.kf8.parts # Document text in KF8 format
 mobi.resources # Images, fonts, audio, video
 
 ----
@@ -73,17 +73,16 @@ mobi.description = "The book is the sailor Ishmael's narrative of the obsessive 
   " captain of the whaling ship Pequod, for revenge on Moby Dick, the giant white sperm whale " \
   "that on the ship's previous voyage bit off Ahab's leg at the knee."
 
-# Add text
-mobi.mobi6.flow << '<html><body>Book text in MOBI6 format</body></html>'
-# Or, remove MOBI6 part if you don't want it
-#mobi.mobi6 = nil
+# Add MOBI6 data
+mobi.mobi6 = Dyck::MobiData.new
+mobi.mobi6.parts << '<html><body>Book text in MOBI6 format</body></html>'
 
-# KF8 is optional, add it if you want to
+# And/or, add KF8 data
 mobi.kf8 = Dyck::MobiData.new
-mobi.kf8.flow << '<html><body>Book text in KF8 format</body></html>'
+mobi.kf8.parts << '<html><body>Book text in KF8 format</body></html>'
 
 # Write to file
-File.open('mobi-dick.mobi', 'wb') do |f|
+File.open('moby-dick.mobi', 'wb') do |f|
   mobi.write(f)
 end
 ----
