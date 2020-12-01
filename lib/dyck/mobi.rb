@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require 'dyck/index'
 require 'dyck/palmdb'
+require 'dyck/util'
 require 'time'
 
 module Dyck
@@ -30,13 +32,27 @@ module Dyck
     end
 
     class << self
-      # @param tag [Fixnum]
+      # @param tag [Integer]
       # @param records [Array<Dyck::ExthRecord>]
       def find(tag, records)
         records.detect { |record| record.tag == tag }
       end
     end
   end
+
+  MobiHeader = Struct.new(
+    :version,
+    :mobi_type,
+    :text_encoding,
+    :extra_flags,
+    :fdst_index,
+    :fdst_section_count,
+    :image_index,
+    :full_name_offset,
+    :full_name_length,
+    :frag_index,
+    :skel_index
+  )
 
   # A single MOBI6/KF8 data
   class MobiData # rubocop:disable Metrics/ClassLength
@@ -62,7 +78,12 @@ module Dyck
 
     MAX_RECORD_SIZE = 4096
 
-    MOBI_NOTSET = 0xffffffff
+    INDX_TAG_SKEL_COUNT = IndexTagKey.new(1, 0)
+    INDX_TAG_SKEL_POSITION = IndexTagKey.new(6, 0)
+    INDX_TAG_SKEL_LENGTH = IndexTagKey.new(6, 1)
+
+    INDX_TAG_FRAG_POSITION = IndexTagKey.new(6, 0)
+    INDX_TAG_FRAG_LENGTH = IndexTagKey.new(6, 1)
 
     # @return Integer
     attr_accessor(:compression)
@@ -76,6 +97,8 @@ module Dyck
     attr_accessor(:version)
     # @return [Array<String>]
     attr_accessor(:flow)
+    # @return [Array<String>]
+    attr_accessor(:parts)
 
     def initialize( # rubocop:disable Metrics/ParameterLists
       compression: NO_COMPRESSION,
@@ -83,7 +106,8 @@ module Dyck
       mobi_type: 2,
       text_encoding: TEXT_ENCODING_UTF8,
       version: 8,
-      flow: []
+      flow: [],
+      parts: []
     )
       @compression = compression
       @encryption = encryption
@@ -91,33 +115,49 @@ module Dyck
       @text_encoding = text_encoding
       @version = version
       @flow = flow
+      @parts = parts
     end
 
     class << self
       # @param records [Array<Dyck::PalmDBRecord>]
-      # @param index [Fixnum]
-      def read(records, index) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-        io = StringIO.new(records[index].content)
-        io.binmode
-
+      def read(records) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+        io = StringIO.new(records[0].content)
         result = MobiData.new
         result.compression, _zero, _text_length, text_record_count, _text_record_size, result.encryption, _unknown1 =
           io.read(16).unpack('nnNn*')
         unless SUPPORTED_COMPRESSIONS.include? result.compression
-          raise ArgumentError, %(Unsupported compression: #{result.compression})
+          raise ArgumentError, %(Unsupported MOBI compression: #{result.compression})
         end
         unless SUPPORTED_ENCRYPTIONS.include? result.encryption
-          raise ArgumentError, %(Unsupported encryption: #{result.encryption})
+          raise ArgumentError, %(Unsupported MOBI encryption: #{result.encryption})
         end
 
-        extra_flags, fdst_index, fdst_section_count, image_index, full_name = read_mobi_header(result, io)
+        mobi_header = read_mobi_header(io)
+        result.mobi_type = mobi_header.mobi_type
+        result.text_encoding = mobi_header.text_encoding
+        result.version = mobi_header.version
         exth_records = read_exth_header(io)
 
-        content = read_content(index + 1, text_record_count, records, extra_flags)
-        fdst = read_fdst(fdst_index, index, records, fdst_section_count)
-        result.flow = reconstruct_flow(content, fdst)
+        if set?(mobi_header.full_name_offset)
+          io.seek(mobi_header.full_name_offset)
+          full_name = io.read(mobi_header.full_name_length)
+        else
+          full_name = ''.b
+        end
 
-        [result, image_index, exth_records, full_name]
+        content = read_content(text_record_count, records[1..-1], mobi_header.extra_flags)
+        fdst = read_fdst(mobi_header.fdst_index, records, mobi_header.fdst_section_count)
+        result.flow = reconstruct_flow(content, fdst)
+        skel = MobiData.set?(mobi_header.skel_index) ? Index.read(records[mobi_header.skel_index..-1], 'skel') : nil
+        frag = MobiData.set?(mobi_header.frag_index) ? Index.read(records[mobi_header.frag_index..-1], 'frag') : nil
+        result.parts = reconstruct_parts(result.flow, skel, frag)
+        [result, mobi_header.image_index, exth_records, full_name]
+      end
+
+      # @param field [Integer, nil]
+      # @return [Boolean]
+      def set?(field)
+        !field.nil? && field != MOBI_NOTSET
       end
 
       private
@@ -134,115 +174,136 @@ module Dyck
         end
       end
 
-      # @param offset [Fixnum]
-      # @param count [Fixnum]
+      # @param flow [Array<String>]
+      # @param skel [Dyck::Index, nil]
+      # @param frag [Dyck::Index, nil]
+      def reconstruct_parts(flow, skel, frag) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+        return [] if flow.empty?
+
+        rawml = flow.shift
+        return [rawml] if skel.nil? || frag.nil?
+
+        frag_offset = 0
+        insert_offset = 0
+        io = StringIO.new(rawml)
+        skel.entries.map do |skel_entry|
+          skel_position = skel_entry.tag_value(INDX_TAG_SKEL_POSITION)
+          skel_length = skel_entry.tag_value(INDX_TAG_SKEL_LENGTH)
+          fragments_count = skel_entry.tag_value(INDX_TAG_SKEL_COUNT)
+
+          io.seek(skel_position, IO::SEEK_SET)
+          part = io.read(skel_length)
+
+          frag.entries[frag_offset..frag_offset + fragments_count - 1].each do |f|
+            insert_pos = Integer(f.label, 10)
+            insert_pos -= insert_offset
+            frag_length = f.tag_value(INDX_TAG_FRAG_LENGTH)
+            part.insert(insert_pos, io.read(frag_length))
+          end
+          frag_offset += fragments_count
+          insert_offset += part.size
+          part
+        end
+      end
+
+      # @param count [Integer]
       # @param records [Array<PalmDBRecord>]
       # @return [String]
-      def read_content(offset, count, records, extra_flags)
+      def read_content(count, records, extra_flags)
         content = ''.b
         (0..count - 1).each do |idx|
-          record_content = records[offset + idx].content
+          record_content = records[idx].content
           extra_size = get_record_extra_size(record_content, extra_flags)
           content += record_content[0..record_content.bytesize - extra_size - 1]
         end
         content
       end
 
-      # @param fdst_index [Fixnum, nil]
-      # @param offset [Fixnum]
+      # @param fdst_index [Integer, nil]
       # @param records [Array<Dyck::PalmDBRecord>]
       # @return [Array<Range>]
-      def read_fdst(fdst_index, offset, records, fdst_section_count)
+      def read_fdst(fdst_index, records, fdst_section_count)
         return nil if fdst_index.nil? || fdst_section_count.nil? || fdst_section_count <= 1
 
-        fdst_record = records[offset + fdst_index]
+        fdst_record = records[fdst_index]
         io = StringIO.new(fdst_record.content)
         magic, _data_offset, _section_count = io.read(12).unpack(FDST_HEADER)
         raise ArgumentError, %(Unsupported FDST magic: #{magic}) if magic != FDST_MAGIC
 
-        (0..fdst_section_count - 1).map do |_|
+        fdst_section_count.times.map do |_|
           start, end_ = io.read(8).unpack('NN')
           (start..end_)
         end
       end
 
       # @param data [String]
-      # @param offset [Fixnum]
-      # @return [Fixnum]
-      def get_varlen_dec(data, offset)
-        bitpos = 0
-        result = 0
-        loop do
-          v = data[offset - 1].unpack1('C')
-          result |= (v & 0x7F) << bitpos
-          bitpos += 7
-          offset -= 1
-          break if (v & 0x80) != 0 || offset.zero?
-        end
-        result
-      end
-
-      # @param data [String]
-      # @param extra_flags [Fixnum]
-      def get_record_extra_size(data, extra_flags)
+      # @param extra_flags [Integer]
+      # @return [Integer]
+      def get_record_extra_size(data, extra_flags) # rubocop:disable Metrics/MethodLength
         num = 0
-        size = data.size
         flags = extra_flags >> 1
         while flags != 0
-          num += get_varlen_dec(data, size - num) if (flags & 1) != 0
+          if (flags & 1) != 0
+            val, _consumed = Dyck.get_varlen_dec(data, data.size - num - 1)
+            num += val
+          end
           flags >>= 1
         end
-        num += (data[size - num - 1].unpack1('C') & 0x3) + 1 if (extra_flags & 1) != 0
+        num += (data[data.size - num - 1].unpack1('C') & 0x3) + 1 if (extra_flags & 1) != 0
         num
       end
 
-      # @param mobi_data [Dyck::MobiData]
       # @param io [IO, StringIO]
-      def read_mobi_header(mobi_data, io) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+      # @return [Dyck::MobiHeader]
+      def read_mobi_header(io) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
         magic = io.read(4)
-        raise ArgumentError, %(Unsupported magic: #{magic}) if magic != MOBI_MAGIC
+        raise ArgumentError, %(Unsupported MOBI magic: #{magic}) if magic != MOBI_MAGIC
 
         mobi_header_length = io.read(4).unpack1('N')
         mobi_header = StringIO.new(io.read(mobi_header_length - 8))
-        mobi_data.mobi_type, mobi_data.text_encoding, _uid, mobi_data.version, = mobi_header.read(15 * 4).unpack('N*')
+        result = MobiHeader.new
+        result.mobi_type, result.text_encoding, _uid, result.version, = mobi_header.read(15 * 4).unpack('N*')
 
-        unless SUPPORTED_TEXT_ENCODINGS.include?(mobi_data.text_encoding)
-          raise ArgumentError, %(Unsupported text encoding: #{mobi_data.text_encoding})
+        unless SUPPORTED_TEXT_ENCODINGS.include?(result.text_encoding)
+          raise ArgumentError, %(Unsupported text encoding: #{result.text_encoding})
         end
 
         # there are more fields here
-        full_name_offset, full_name_length, = mobi_header.read(5 * 4)&.unpack('N*')
-        pos = io.tell
-        io.seek(full_name_offset)
-        full_name = io.read(full_name_length)
-        io.seek(pos)
+        result.full_name_offset, result.full_name_length, = mobi_header.read(5 * 4)&.unpack('N*')
         # there are more fields here
-        _min_version, image_index, = mobi_header.read(22 * 4)&.unpack('N*')
+        _min_version, result.image_index, = mobi_header.read(22 * 4)&.unpack('N*')
         # there are more fields here
-        if mobi_data.version >= 8
-          fdst_index = mobi_header.read(4)&.unpack1('N')
+        if result.version >= 8
+          result.fdst_index = mobi_header.read(4)&.unpack1('N')
         else
           # Assume that last_text_index is fdst_index for MOBI6
-          _, fdst_index = mobi_header.read(4)&.unpack('nn')
+          _, result.fdst_index = mobi_header.read(4)&.unpack('nn')
         end
-        fdst_section_count = mobi_header.read(4)&.unpack1('N')
+        result.fdst_section_count = mobi_header.read(4)&.unpack1('N')
         # there are more fields here
-        mobi_header.seek(42, IO::SEEK_CUR)
-        extra_flags = mobi_header.read(2)&.unpack1('n') || 0
+        mobi_header.seek(10 * 4 + 2, IO::SEEK_CUR)
+        result.extra_flags = mobi_header.read(2)&.unpack1('n') || 0
+        # there are more fields here
+        mobi_header.seek(4, IO::SEEK_CUR)
+        if result.version >= 8
+          result.frag_index, result.skel_index = mobi_header.read(8).unpack('N*')
+        else
+          result.frag_index = result.skel_index = MOBI_NOTSET
+        end
         # there are more fields here
 
-        [extra_flags, fdst_index, fdst_section_count, image_index, full_name]
+        result
       end
 
       # @param io [IO, StringIO]
       # @return [Array<Dyck::ExthRecord]
       def read_exth_header(io)
         exth = io.read(4)
-        raise ArgumentError, %(Unsupported EXTH: #{exth}) if exth != EXTH_MAGIC
+        raise ArgumentError, %(Unsupported EXTH magic: #{exth}) if exth != EXTH_MAGIC
 
         exth_header_length, exth_record_count = io.read(8).unpack('N*')
         exth_header = StringIO.new(io.read(exth_header_length - 12))
-        (0..exth_record_count - 1).map do |_|
+        exth_record_count.times.map do |_|
           tag, data_len = exth_header.read(8).unpack('N*')
           data = exth_header.read(data_len - 8)
           ExthRecord.new(tag: tag, data: data)
@@ -251,12 +312,26 @@ module Dyck
     end
 
     # @param header_record [Dyck::PalmDBRecord]
-    # @param text_length [Fixnum]
-    # @param text_record_count [Fixnum]
-    # @param fdst_index [Fixnum]
-    # @param image_index [Fixnum]
+    # @param text_length [Integer]
+    # @param text_record_count [Integer]
+    # @param fdst_index [Integer]
+    # @param image_index [Integer]
     # @param exth_records [Array<Dyck::ExthRecord>]
-    def write(header_record, text_length, text_record_count, fdst_index, image_index, exth_records, full_name) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
+    # @param flow [Array<String>]
+    # @param skel_index [Integer]
+    # @param frag_index [Integer]
+    def write( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
+      header_record,
+      text_length,
+      text_record_count,
+      fdst_index,
+      image_index,
+      exth_records,
+      full_name,
+      flow,
+      skel_index = MOBI_NOTSET,
+      frag_index = MOBI_NOTSET
+    )
       io = StringIO.new
       io.binmode
       io.write([compression, 0, text_length, text_record_count, MAX_RECORD_SIZE, encryption, 0].pack('nnNn*'))
@@ -264,8 +339,7 @@ module Dyck
       exth_buf = StringIO.new
       exth_buf.binmode
       write_exth_header(exth_buf, exth_records)
-
-      write_mobi_header(io, fdst_index, @flow.size, image_index, exth_buf.size, full_name)
+      write_mobi_header(io, fdst_index, flow.size, image_index, exth_buf.size, full_name, skel_index, frag_index)
       io.write(exth_buf.string)
       io.write(full_name)
       io.write("\0")
@@ -273,20 +347,22 @@ module Dyck
       header_record.content = io.string
     end
 
-    def content_chunks
-      bytes = @flow.join.bytes
+    # @param flow [Array<String>]
+    def content_chunks(flow)
+      bytes = flow.join.bytes
       [bytes.each_slice(MobiData::MAX_RECORD_SIZE).map do |chunk|
         PalmDBRecord.new(content: chunk.pack('c*'))
       end, bytes.size]
     end
 
     # @param fdst_record [Dyck::PalmDBRecord]
-    def write_fdst(fdst_record)
+    # @return [void]
+    def write_fdst(fdst_record, flow)
       io = StringIO.new
       io.binmode
-      io.write([FDST_MAGIC, 12, @flow.size].pack(%(A#{FDST_MAGIC.bytesize}NN)))
+      io.write([FDST_MAGIC, 12, flow.size].pack(%(A#{FDST_MAGIC.bytesize}NN)))
       start = 0
-      @flow.each do |f|
+      flow.each do |f|
         end_ = start + f.bytesize
         io.write([start, end_].pack('NN'))
         start = end_
@@ -297,10 +373,22 @@ module Dyck
     private
 
     # @param io [IO, StringIO]
-    # @param fdst_index [Fixnum]
-    # @param fdst_section_count [Fixnum]
-    # @param image_index [Fixnum]
-    def write_mobi_header(io, fdst_index, fdst_section_count, image_index, exth_size, full_name) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
+    # @param fdst_index [Integer]
+    # @param fdst_section_count [Integer]
+    # @param image_index [Integer]
+    # @param skel_index [Integer]
+    # @param frag_index [Integer]
+    # @return [void]
+    def write_mobi_header( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
+      io,
+      fdst_index,
+      fdst_section_count,
+      image_index,
+      exth_size,
+      full_name,
+      skel_index,
+      frag_index
+    )
       header_length = 264
       uid = 0
       io.write([MOBI_MAGIC, header_length, @mobi_type, @text_encoding, uid, @version]
@@ -314,12 +402,15 @@ module Dyck
                    .concat([fdst_index || 0, fdst_section_count])
                    .concat([MOBI_NOTSET] * 10)
                    .concat([0])
-                   .concat([MOBI_NOTSET] * 9)
+                   .concat([MOBI_NOTSET] * 1)
+                   .concat([skel_index, frag_index])
+                   .concat([MOBI_NOTSET] * 6)
                    .pack(%(A#{MOBI_MAGIC.bytesize}N*)))
     end
 
     # @param io [IO, StringIO]
     # @param exth_records [Array<Dyck::ExthRecord>]
+    # @return [void]
     def write_exth_header(io, exth_records)
       io.write(EXTH_MAGIC)
 
@@ -371,7 +462,7 @@ module Dyck
     # @return [String]
     attr_accessor(:copyright)
 
-    # @param mobi6 [Dyck::MobiData]
+    # @param mobi6 [Dyck::MobiData, nil]
     # @param kf8 [Dyck::MobiData, nil]
     # @param resources [Array<Dyck::MobiResource>]
     # @param author [String]
@@ -414,13 +505,13 @@ module Dyck
       # @param palmdb [Dyck::PalmDB]
       # @return [Dyck::Mobi]
       def from_palmdb(palmdb) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
-        raise ArgumentError, %(Unsupported type: #{palmdb.type}) if palmdb.type != TYPE_MAGIC
-        raise ArgumentError, %(Unsupported creator: #{palmdb.type}) if palmdb.creator != CREATOR_MAGIC
+        raise ArgumentError, %(Unsupported PalmBD type: #{palmdb.type}) if palmdb.type != TYPE_MAGIC
+        raise ArgumentError, %(Unsupported PalmBD creator: #{palmdb.type}) if palmdb.creator != CREATOR_MAGIC
 
         mobi6, image_index, exth_records, full_name = if palmdb.records.empty?
                                                         [MobiData.new(version: 6), nil, [], ''.b]
                                                       else
-                                                        MobiData.read(palmdb.records, 0)
+                                                        MobiData.read(palmdb.records)
                                                       end
 
         if mobi6.version >= 8
@@ -434,14 +525,12 @@ module Dyck
             kf8 = nil
           else
             # MOBI6 + KF8 hybrid file
-            kf8, _kf8_image_index, exth_records, _kf8_full_name = MobiData.read(
-              palmdb.records,
-              kf8_boundary.data.unpack1('N')
-            )
+            kf8_offset = kf8_boundary.data.unpack1('N')
+            kf8, _kf8_image_index, exth_records, _kf8_full_name = MobiData.read(palmdb.records[kf8_offset..-1])
           end
         end
 
-        resources = read_resources(palmdb.records, image_index)
+        resources = image_index.nil? ? [] : read_resources(palmdb.records[image_index..-1])
 
         publishing_date = ExthRecord.find(ExthRecord::PUBLISHING_DATE, exth_records)&.data
         Mobi.new(
@@ -461,13 +550,10 @@ module Dyck
       private
 
       # @param records [Array<Dyck::PalmDBRecord>]
-      # @param image_index [Fixnum]
       # @return [Array<Dyck::MobiResource>]
-      def read_resources(records, image_index) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
-        return [] if image_index.nil?
-
+      def read_resources(records) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
         result = []
-        (image_index..records.size - 1).map do |index| # rubocop:disable Metrics/BlockLength
+        (0..records.size - 1).map do |index| # rubocop:disable Metrics/BlockLength
           content = records[index].content
 
           break if content == BOUNDARY_MAGIC
@@ -508,11 +594,14 @@ module Dyck
     end
 
     # @return [Dyck::PalmDB]
-    def to_palmdb # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    def to_palmdb # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
       palmdb = PalmDB.new(type: TYPE_MAGIC, creator: CREATOR_MAGIC)
+
+      image_index = MOBI_NOTSET
       unless @mobi6.nil?
         palmdb.records << (mobi6_header = PalmDBRecord.new)
-        mobi6_content_chunks, mobi6_text_length = @mobi6.content_chunks
+        mobi6_flow = [@mobi6.parts.empty? ? '' : @mobi6.parts.join('\n')] + @mobi6.flow
+        mobi6_content_chunks, mobi6_text_length = @mobi6.content_chunks(mobi6_flow)
         palmdb.records.concat(mobi6_content_chunks)
         image_index = write_resources(palmdb.records)
       end
@@ -537,12 +626,33 @@ module Dyck
       if @kf8
         kf8_boundary = palmdb.records.size
         palmdb.records << (kf8_header = PalmDBRecord.new)
-        kf8_content_chunks, kf8_text_length = @kf8.content_chunks
+        kf8_flow = [@kf8.parts.empty? ? '' : @kf8.parts.join('\n')] + @kf8.flow
+        kf8_content_chunks, kf8_text_length = @kf8.content_chunks(kf8_flow)
         palmdb.records.concat(kf8_content_chunks)
-        image_index = write_resources(palmdb.records) if @mobi6.nil?
+        image_index = write_resources(palmdb.records) if image_index == MOBI_NOTSET
+
         fdst_index = palmdb.records.size - kf8_boundary
         palmdb.records << (fdst_record = PalmDBRecord.new)
-        @kf8.write_fdst(fdst_record)
+        @kf8.write_fdst(fdst_record, kf8_flow)
+
+        skel = Index.new('skel')
+
+        skel_offset = 0
+        @kf8.parts.each_with_index do |part, part_index|
+          skel_label = %(SKEL#{part_index.to_s.rjust(10, '0').b})
+          skel.entries << (skel_entry = IndexEntry.new(label: skel_label))
+          skel_entry.set_tag_value(MobiData::INDX_TAG_SKEL_POSITION, skel_offset)
+          skel_entry.set_tag_value(MobiData::INDX_TAG_SKEL_LENGTH, part.size)
+          skel_entry.set_tag_value(MobiData::INDX_TAG_SKEL_COUNT, 0)
+        end
+
+        skel_index = palmdb.records.size - kf8_boundary
+        palmdb.records.concat(skel.write)
+
+        frag = Index.new('frag')
+        frag_index = palmdb.records.size - kf8_boundary
+        palmdb.records.concat(frag.write)
+
         @kf8.write(
           kf8_header,
           kf8_text_length,
@@ -550,13 +660,25 @@ module Dyck
           fdst_index,
           image_index,
           exth_records,
-          @title
+          @title,
+          kf8_flow,
+          skel_index,
+          frag_index
         )
         # Only MOBI6 needs this
         exth_records << ExthRecord.new(tag: ExthRecord::KF8_BOUNDARY, data: [kf8_boundary].pack('N'))
       end
 
-      @mobi6&.write(mobi6_header, mobi6_text_length, mobi6_content_chunks.size, 0, image_index, exth_records, @title)
+      @mobi6&.write(
+        mobi6_header,
+        mobi6_text_length,
+        mobi6_content_chunks.size,
+        0,
+        image_index,
+        exth_records,
+        @title,
+        mobi6_flow
+      )
 
       palmdb
     end
@@ -564,7 +686,7 @@ module Dyck
     private
 
     # @param records [Array<Dyck::PalmDBRecord>]
-    # @return [Fixnum]
+    # @return [Integer]
     def write_resources(records) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength:
       image_index = records.size
       records.concat(@resources.map do |resource|
