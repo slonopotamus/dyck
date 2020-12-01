@@ -46,8 +46,9 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.mobi6.version).to eq(6)
   end
 
-  it 'has MOBI6 flow' do
-    expect(subject.mobi6.flow[0].size).to eq(15_928)
+  it 'has MOBI6 part' do
+    expect(subject.mobi6.parts.size).to eq(1)
+    expect(subject.mobi6.parts[0].size).to eq(15_928)
   end
 
   it 'has KF8 header' do
@@ -60,9 +61,17 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
   end
 
   it 'has KF8 flow' do
-    expect(subject.kf8.flow.size).to eq(6)
-    expect(subject.kf8.flow[0].size).to eq(20_169)
-    expect(subject.kf8.flow[5].size).to eq(44)
+    expect(subject.kf8.flow.size).to eq(5)
+    expect(subject.kf8.flow[0].size).to eq(1_877)
+    expect(subject.kf8.flow[4].size).to eq(44)
+  end
+
+  it 'has KF8 parts' do
+    skip 'skel/frag index writing is not implemented yet' if subject.kf8.parts.empty?
+
+    expect(subject.kf8.parts.size).to eq(10)
+    expect(subject.kf8.parts[0].size).to eq(1_612)
+    expect(subject.kf8.parts[9].size).to eq(3_060)
   end
 
   it 'has resources' do
