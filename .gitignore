@@ -2,3 +2,4 @@
 /.idea/
 /.rakeTasks
 /Gemfile.lock
+/pkg/
