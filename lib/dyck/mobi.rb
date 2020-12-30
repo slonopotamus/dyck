@@ -23,8 +23,10 @@ module Dyck
     CREATOR_SOFTWARE_BUILD = 207
     CREATOR_SOFTWARE_REVISION = 535
 
+    # @return [Integer]
     attr_reader(:tag)
-    attr_accessor(:data)
+    # @return [String]
+    attr_reader(:data)
 
     def initialize(tag: 0, data: ''.b)
       @tag = tag
@@ -78,12 +80,12 @@ module Dyck
 
     MAX_RECORD_SIZE = 4096
 
-    INDX_TAG_SKEL_COUNT = IndexTagKey.new(1, 0)
-    INDX_TAG_SKEL_POSITION = IndexTagKey.new(6, 0)
-    INDX_TAG_SKEL_LENGTH = IndexTagKey.new(6, 1)
+    INDX_TAG_SKEL_COUNT = IndexTagKey.new(tag_id: 1, tag_index: 0)
+    INDX_TAG_SKEL_POSITION = IndexTagKey.new(tag_id: 6, tag_index: 0)
+    INDX_TAG_SKEL_LENGTH = IndexTagKey.new(tag_id: 6, tag_index: 1)
 
-    INDX_TAG_FRAG_POSITION = IndexTagKey.new(6, 0)
-    INDX_TAG_FRAG_LENGTH = IndexTagKey.new(6, 1)
+    INDX_TAG_FRAG_POSITION = IndexTagKey.new(tag_id: 6, tag_index: 0)
+    INDX_TAG_FRAG_LENGTH = IndexTagKey.new(tag_id: 6, tag_index: 1)
 
     # @return Integer
     attr_accessor(:compression)
@@ -241,7 +243,7 @@ module Dyck
         flags = extra_flags >> 1
         while flags != 0
           if (flags & 1) != 0
-            val, _consumed = Dyck.get_varlen_dec(data, data.size - num - 1)
+            val, _consumed = Dyck.decode_varlen_dec(data, data.size - num - 1)
             num += val
           end
           flags >>= 1
@@ -414,7 +416,7 @@ module Dyck
                    .concat([MOBI_NOTSET] * 10)
                    .concat([0])
                    .concat([MOBI_NOTSET] * 1)
-                   .concat([skel_index, frag_index])
+                   .concat([frag_index, skel_index])
                    .concat([MOBI_NOTSET] * 6)
                    .pack(%(A#{MOBI_MAGIC.bytesize}N*)))
     end
@@ -634,7 +636,7 @@ module Dyck
       ]
       exth_records += @subjects.map { |s| ExthRecord.new(tag: ExthRecord::SUBJECT, data: s) }
 
-      if @kf8
+      unless @kf8.nil?
         kf8_boundary = palmdb.records.size
         palmdb.records << (kf8_header = PalmDBRecord.new)
         kf8_flow = [@kf8.parts.empty? ? '' : @kf8.parts.join('\n')] + @kf8.flow
@@ -655,6 +657,7 @@ module Dyck
           skel_entry.set_tag_value(MobiData::INDX_TAG_SKEL_POSITION, skel_offset)
           skel_entry.set_tag_value(MobiData::INDX_TAG_SKEL_LENGTH, part.size)
           skel_entry.set_tag_value(MobiData::INDX_TAG_SKEL_COUNT, 0)
+          skel_offset += part.size
         end
 
         skel_index = palmdb.records.size - kf8_boundary

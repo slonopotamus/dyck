@@ -12,10 +12,27 @@ module Dyck # rubocop:disable Style/Documentation
     ((value + (value >> 4) & 0xF0F0F0F) * 0x1010101) >> 24
   end
 
+  # @param value [Integer]
+  # @param forward [Boolean]
+  # @return [String]
+  def self.encode_varlen(value, forward: true)
+    raise ArgumentError('Cannot encode negative number as varlen') unless value >= 0
+
+    bytes = []
+    loop do
+      b = value & 0b01111111
+      value >>= 7
+      bytes << b
+      break if value.zero?
+    end
+    bytes[forward ? 0 : -1] |= 0b10000000
+    bytes.reverse.pack('C*')
+  end
+
   # @param data [String]
   # @param offset [Integer]
   # @param forward [Boolean]
-  def self.get_varlen(data, offset, forward: true) # rubocop:disable Metrics/MethodLength
+  def self.decode_varlen(data, offset, forward: true) # rubocop:disable Metrics/MethodLength
     val = 0
     byte_count = 0
     stop_flag = 0x80
@@ -41,7 +58,7 @@ module Dyck # rubocop:disable Style/Documentation
 
   # @param data [String]
   # @param offset [Integer]
-  def self.get_varlen_dec(data, offset)
-    get_varlen(data, offset, forward: false)
+  def self.decode_varlen_dec(data, offset)
+    decode_varlen(data, offset, forward: false)
   end
 end

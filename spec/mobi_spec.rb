@@ -65,8 +65,6 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
   end
 
   it 'has KF8 parts' do
-    skip 'skel/frag index writing is not implemented yet' if subject.kf8.parts.empty?
-
     expect(subject.kf8.parts.size).to eq(10)
     expect(subject.kf8.parts[0].size).to eq(1_612)
     expect(subject.kf8.parts[9].size).to eq(3_060)
