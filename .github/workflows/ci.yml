@@ -16,7 +16,8 @@ jobs:
   test:
     strategy:
       matrix:
-        ruby: ['jruby', '2.4', '2.5', '2.6', '2.7', '3.0']
+        # TODO: JRuby is disabled because of https://github.com/jruby/jruby/issues/6606
+        ruby: ['2.4', '2.5', '2.6', '2.7', '3.0']
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
