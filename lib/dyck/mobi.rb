@@ -602,6 +602,8 @@ module Dyck
         result
       end
 
+      # @param data [String]
+      # @return [String]
       def read_font_resource(data) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
         decoded_size, flags, data_offset, xor_key_len, xor_key_offset = data[AUDIO_MAGIC.size..-1].unpack('N5')
 
@@ -744,6 +746,7 @@ module Dyck
     end
 
     # @param data [String]
+    # @param compress [Boolean]
     # @return [String]
     def write_font_resource(data, compress: true)
       flags = 0
