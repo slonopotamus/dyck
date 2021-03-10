@@ -594,8 +594,9 @@ module Dyck
             offset = content[VIDEO_MAGIC.size..VIDEO_MAGIC.size + 4].unpack1('N')
             type = :video
             content = content[offset..content.size - 1]
+          else
+            type = :unknown
           end
-          next if type.nil?
 
           result << MobiResource.new(type, content)
         end
