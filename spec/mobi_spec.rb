@@ -71,7 +71,7 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
   end
 
   it 'has resources' do
-    expect(subject.resources.size).to eq(15)
+    expect(subject.resources.size).to eq(19)
   end
 end
 
