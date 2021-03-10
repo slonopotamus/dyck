@@ -8,6 +8,7 @@ RSpec.shared_examples 'frag index' do
     entry = subject.entries[9]
     expect(entry.label).to eq('0000017634')
     expect(entry.tags.size).to eq(4)
+    expect(entry.tag_value(Dyck::MobiData::INDX_TAG_FRAG_POSITION)).to eq(0)
     expect(entry.tag_value(Dyck::MobiData::INDX_TAG_FRAG_LENGTH)).to eq(2521)
   end
 end
@@ -30,6 +31,12 @@ end
 RSpec.shared_examples 'skel index' do
   it 'has entries' do
     expect(subject.entries.size).to eq(10)
+    entry = subject.entries[9]
+    expect(entry.label).to eq('SKEL0000000009')
+    expect(entry.tags.size).to eq(2)
+    expect(entry.tag_value(Dyck::MobiData::INDX_TAG_SKEL_COUNT)).to eq(1)
+    expect(entry.tag_value(Dyck::MobiData::INDX_TAG_SKEL_POSITION)).to eq(17_109)
+    expect(entry.tag_value(Dyck::MobiData::INDX_TAG_SKEL_LENGTH)).to eq(539)
   end
 end
 
