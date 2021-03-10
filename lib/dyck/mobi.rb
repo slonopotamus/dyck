@@ -4,6 +4,7 @@ require 'dyck/index'
 require 'dyck/palmdb'
 require 'dyck/util'
 require 'time'
+require 'zlib'
 
 module Dyck
   MobiResource = Struct.new(:type, :content)
@@ -581,8 +582,8 @@ module Dyck
           elsif content.start_with?(GIF_MAGIC)
             type = :gif
           elsif content.start_with?(FONT_MAGIC)
-            # TODO: strip prefix
             type = :font
+            content = read_font_resource(content)
           elsif content.start_with?(PNG_MAGIC)
             type = :png
           elsif content.start_with?(AUDIO_MAGIC)
@@ -599,6 +600,26 @@ module Dyck
           result << MobiResource.new(type, content)
         end
         result
+      end
+
+      def read_font_resource(data) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+        decoded_size, flags, data_offset, xor_key_len, xor_key_offset = data[AUDIO_MAGIC.size..-1].unpack('N5')
+
+        font_data = data[data_offset..-1]
+
+        unless (flags & 0b10).zero?
+          key = data[xor_key_offset..xor_key_offset + xor_key_len]
+          extent = [font_data.bytesize, 1040].min
+
+          (0..extent - 1).each do |n|
+            font_data[n] ^= key[n % xor_key_len] # XOR of buf and key
+          end
+        end
+
+        font_data = Zlib::Inflate.inflate(font_data) unless (flags & 0b1).zero?
+        raise ArgumentError, 'Uncompressed font size mismatch' if font_data.bytesize != decoded_size
+
+        font_data
       end
     end
 
@@ -711,6 +732,8 @@ module Dyck
                     AUDIO_MAGIC + [AUDIO_MAGIC.size + 4].pack('N') + resource.content
                   when :video
                     VIDEO_MAGIC + [VIDEO_MAGIC.size + 4].pack('N') + resource.content
+                  when :font
+                    write_font_resource(resource.content)
                   else
                     resource.content
                   end
@@ -718,6 +741,25 @@ module Dyck
       end)
       records << PalmDBRecord.new(content: BOUNDARY_MAGIC)
       image_index
+    end
+
+    # @param data [String]
+    # @return [String]
+    def write_font_resource(data, compress: true)
+      flags = 0
+      decoded_size = data.bytesize
+
+      if compress
+        flags |= 0b1
+        data = Zlib::Deflate.deflate(data, Zlib::BEST_COMPRESSION)
+      end
+
+      # no obfuscation support for now
+      xor_key = ''.b
+      xor_key_offset = FONT_MAGIC.bytesize + 4 * 5
+      data_offset = xor_key_offset + xor_key.bytesize
+
+      FONT_MAGIC + [decoded_size, flags, data_offset, xor_key.bytesize, xor_key_offset].pack('N*') + data
     end
   end
 end
