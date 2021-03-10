@@ -63,7 +63,7 @@ module Dyck
   class Index # rubocop:disable Metrics/ClassLength
     INDX_MAGIC = 'INDX'.b
     INDX_HEADER = %(A#{INDX_MAGIC.size}N*)
-    INDX_HEADER_LENGTH = 7 * 4
+    INDX_HEADER_LENGTH = 192
 
     TAGX_MAGIC = 'TAGX'.b
     TAGX_HEADER = %(A#{TAGX_MAGIC.size}N*)
@@ -92,7 +92,8 @@ module Dyck
         tagx_control_byte_count = 0
         record_count = 0
         tags = []
-        read_index_record(records[0]) do |io, _idxt_offset, entries_count|
+        read_index_record(records[0]) do |io, _entries_offset, entries_count, tagx_offset|
+          io.seek(tagx_offset) unless tagx_offset.nil?
           tagx_magic, tagx_record_length, tagx_control_byte_count = io.read(12).unpack(TAGX_HEADER)
           raise ArgumentError, %(Unsupported TAGX magic: #{tagx_magic}) if tagx_magic != TAGX_MAGIC
 
@@ -118,8 +119,8 @@ module Dyck
         end
 
         (1..record_count).each do |record_idx|
-          read_index_record(records[record_idx]) do |io, idxt_offset, entries_count|
-            io.seek(idxt_offset)
+          read_index_record(records[record_idx]) do |io, entries_offset, entries_count, _tagx_offset|
+            io.seek(entries_offset)
             idxt_magic, = io.read(IDXT_HEADER_SIZE).unpack(IDXT_HEADER)
             raise ArgumentError, %(Unsupported IDXT magic: #{idxt_magic}) if idxt_magic != IDXT_MAGIC
 
@@ -140,12 +141,16 @@ module Dyck
       # @param record [Dyck::PalmDBRecord]
       def read_index_record(record)
         io = StringIO.new(record.content)
-        magic, header_length, _, _type, _, idxt_offset, entries_count = io.read(INDX_HEADER_LENGTH).unpack(INDX_HEADER)
+        magic = io.read(4)
         raise ArgumentError, %(Unsupported INDX magic: #{magic}) if magic != INDX_MAGIC
 
-        io.seek(header_length)
+        header_length = io.read(4).unpack1('N')
+        header_values = io.read(header_length - 8).unpack('N*')
+        entries_offset = header_values[3]
+        entries_count = header_values[4]
+        tagx_offset = header_values[43]
 
-        yield io, idxt_offset, entries_count
+        yield io, entries_offset, entries_count, tagx_offset
       end
 
       # @param io [StringIO]
@@ -237,14 +242,21 @@ module Dyck
       end
       idxt_offset = INDX_HEADER_LENGTH + entries_data.string.bytesize
 
-      record.content = [INDX_MAGIC, INDX_HEADER_LENGTH, 0, 0, 0, idxt_offset, @entries.size].pack(INDX_HEADER)
+      record.content = ([INDX_MAGIC, INDX_HEADER_LENGTH, 0, 0, 0, idxt_offset,
+                         @entries.size] + [0] * 41).pack(INDX_HEADER)
+      raise 'Wrong index size' unless record.content.size == INDX_HEADER_LENGTH
+
       record.content += entries_data.string
       record.content += [IDXT_MAGIC].pack(IDXT_HEADER)
       record.content += entries_offsets.pack('n*')
 
       tagx_record_length = 12 + tags.size * 4
 
-      header.content = [INDX_MAGIC, INDX_HEADER_LENGTH, 0, 0, 0, 0, records.size].pack(INDX_HEADER)
+      tagx_offset = INDX_HEADER_LENGTH
+      header.content = ([INDX_MAGIC, INDX_HEADER_LENGTH, 0, 0, 0, 0,
+                         records.size] + [0] * 38 + [tagx_offset] + [0] * 2).pack(INDX_HEADER)
+      raise 'Wrong index size' unless header.content.size == INDX_HEADER_LENGTH
+
       header.content += [TAGX_MAGIC, tagx_record_length, tagx_control_byte_count].pack(TAGX_HEADER)
       tags.each do |tagx|
         tagx_data = tagx.nil? ? [0, 0, 0, 1] : [tagx.tag, tagx.values_count, tagx.bitmask << tagx.shift, 0]
