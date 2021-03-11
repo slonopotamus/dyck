@@ -181,7 +181,7 @@ module Dyck
         return [] if flow.empty?
 
         rawml = flow.shift
-        return [rawml] if skel.nil? || frag.nil?
+        return [rawml] if skel.nil?
 
         frag_offset = 0
         insert_offset = 0
@@ -194,11 +194,15 @@ module Dyck
           io.seek(skel_position, IO::SEEK_SET)
           part = io.read(skel_length)
 
-          frag.entries[frag_offset..frag_offset + fragments_count - 1].each do |f|
-            insert_pos = Integer(f.label, 10)
-            insert_pos -= insert_offset
-            frag_length = f.tag_value(INDX_TAG_FRAG_LENGTH)
-            part.insert(insert_pos, io.read(frag_length))
+          if fragments_count > 0
+            raise ArgumentError, "File has fragments but no frag index" if frag.nil?
+
+            frag.entries[frag_offset..frag_offset + fragments_count - 1].each do |f|
+              insert_pos = Integer(f.label, 10)
+              insert_pos -= insert_offset
+              frag_length = f.tag_value(INDX_TAG_FRAG_LENGTH)
+              part.insert(insert_pos, io.read(frag_length))
+            end
           end
           frag_offset += fragments_count
           insert_offset += part.size
@@ -320,7 +324,6 @@ module Dyck
     # @param exth_records [Array<Dyck::ExthRecord>]
     # @param flow [Array<String>]
     # @param skel_index [Integer]
-    # @param frag_index [Integer]
     def write( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
       version,
       header_record,
@@ -331,8 +334,7 @@ module Dyck
       exth_records,
       full_name,
       flow,
-      skel_index = MOBI_NOTSET,
-      frag_index = MOBI_NOTSET
+      skel_index = MOBI_NOTSET
     )
       io = StringIO.new
       io.binmode
@@ -349,8 +351,7 @@ module Dyck
         image_index,
         exth_buf.size,
         full_name,
-        skel_index,
-        frag_index
+        skel_index
       )
       io.write(exth_buf.string)
       io.write(full_name)
@@ -390,7 +391,6 @@ module Dyck
     # @param fdst_section_count [Integer]
     # @param image_index [Integer]
     # @param skel_index [Integer]
-    # @param frag_index [Integer]
     # @return [void]
     def write_mobi_header( # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists
       version,
@@ -400,8 +400,7 @@ module Dyck
       image_index,
       exth_size,
       full_name,
-      skel_index,
-      frag_index
+      skel_index
     )
       header_length = 264
       uid = 0
@@ -417,7 +416,7 @@ module Dyck
                    .concat([MOBI_NOTSET] * 10)
                    .concat([0])
                    .concat([MOBI_NOTSET] * 1)
-                   .concat([frag_index, skel_index])
+                   .concat([MOBI_NOTSET, skel_index])
                    .concat([MOBI_NOTSET] * 6)
                    .pack(%(A#{MOBI_MAGIC.bytesize}N*)))
     end
@@ -687,10 +686,6 @@ module Dyck
         skel_index = palmdb.records.size - kf8_boundary
         palmdb.records.concat(skel.write)
 
-        frag = Index.new('frag')
-        frag_index = palmdb.records.size - kf8_boundary
-        palmdb.records.concat(frag.write)
-
         @kf8.write(
           8,
           kf8_header,
@@ -701,8 +696,7 @@ module Dyck
           exth_records,
           @title,
           kf8_flow,
-          skel_index,
-          frag_index
+          skel_index
         )
         # Only MOBI6 needs this
         exth_records << ExthRecord.new(tag: ExthRecord::KF8_BOUNDARY, data: [kf8_boundary].pack('N'))
