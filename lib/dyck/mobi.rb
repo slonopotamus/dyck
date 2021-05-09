@@ -410,36 +410,36 @@ module Dyck
     )
       header_size = 264
       uid = 0
-      header_data = [MOBI_MAGIC, header_size, @mobi_type, @text_encoding, uid, version]
-                    .append(MOBI_NOTSET) # orth index
-                    .append(MOBI_NOTSET) # infl index
-                    .append(MOBI_NOTSET) # names index
-                    .append(MOBI_NOTSET) # keys index
-                    .concat([MOBI_NOTSET] * 6) # unknown indexes
-                    .append(MOBI_NOTSET) # first record number (starting with 0) that's not the book's text
-                    .concat([16 + header_size + exth_size, full_name.size])
-                    .concat([0] * 3)
-                    .concat([version, image_index])
-                    .concat([0] * 4)
-                    .concat([0x40]) # EXTH flags
-                    .concat([0] * 4)
-                    .append(MOBI_NOTSET) # unknown index
-                    .append(MOBI_NOTSET) # drm index
-                    .concat([0] * 9)
-                    .concat([fdst_index, fdst_section_count, fcis_index])
-                    .append(1) # FCIS record count
-                    .append(flis_index)
-                    .append(1) # FLIS record count
-                    .concat([0] * 2)
-                    .append(MOBI_NOTSET) # srcs index
-                    .concat([0] * 4)
-                    .append(MOBI_NOTSET) # NCX index
-                    .append(MOBI_NOTSET) # FRAG index
-                    .append(skel_index)
-                    .append(MOBI_NOTSET) # DATP index
-                    .append(MOBI_NOTSET) # Guide index
-                    .concat([MOBI_NOTSET, 0, MOBI_NOTSET, 0]) # unknown
-                    .pack(%(A#{MOBI_MAGIC.bytesize}N*))
+      header = [MOBI_MAGIC, header_size, @mobi_type, @text_encoding, uid, version]
+      header << MOBI_NOTSET # orth index
+      header << MOBI_NOTSET # infl index
+      header << MOBI_NOTSET # names index
+      header << MOBI_NOTSET # keys index
+      header += [MOBI_NOTSET] * 6 # unknown indexes
+      header << MOBI_NOTSET # first record number (starting with 0) that's not the book's text
+      header += [16 + header_size + exth_size, full_name.size]
+      header += [0] * 3
+      header += [version, image_index]
+      header += [0] * 4
+      header += [0x40] # EXTH flags
+      header += [0] * 4
+      header << MOBI_NOTSET # unknown index
+      header << MOBI_NOTSET # drm index
+      header += [0] * 9
+      header += [fdst_index, fdst_section_count, fcis_index]
+      header << 1 # FCIS record count
+      header << flis_index
+      header << 1 # FLIS record count
+      header += [0] * 2
+      header << MOBI_NOTSET # srcs index
+      header += [0] * 4
+      header << MOBI_NOTSET # NCX index
+      header << MOBI_NOTSET # FRAG index
+      header << skel_index
+      header << MOBI_NOTSET # DATP index
+      header << MOBI_NOTSET # Guide index
+      header += [MOBI_NOTSET, 0, MOBI_NOTSET, 0] # unknown
+      header_data = header.pack(%(A#{MOBI_MAGIC.bytesize}N*))
       raise %(Internal error: #{header_size} != #{header_data.size}) if header_size != header_data.size
 
       io.write(header_data)
