@@ -14,14 +14,14 @@ RSpec.shared_examples 'frag index' do
 end
 
 describe 'fixture frag index' do
-  subject { read_fixture_idx('frag') }
+  subject { read_fixture_index('frag') }
 
   it_behaves_like 'frag index'
 end
 
 describe 'Dyck-generated frag index' do
   subject do
-    orig = read_fixture_idx('frag')
+    orig = read_fixture_index('frag')
     Dyck::Index.read(orig.write, orig.name)
   end
 
@@ -41,14 +41,14 @@ RSpec.shared_examples 'skel index' do
 end
 
 describe 'fixture skel index' do
-  subject { read_fixture_idx('skel') }
+  subject { read_fixture_index('skel') }
 
   it_behaves_like 'skel index'
 end
 
 describe 'Dyck-generated skel index' do
   subject do
-    orig = read_fixture_idx('skel')
+    orig = read_fixture_index('skel')
     Dyck::Index.read(orig.write, orig.name)
   end
 

@@ -69,10 +69,6 @@ module Dyck
     MOBI_ENCRYPTION = 2
     SUPPORTED_ENCRYPTIONS = [NO_ENCRYPTION].freeze
 
-    TEXT_ENCODING_CP1252 = 1252
-    TEXT_ENCODING_UTF8 = 65_001
-    SUPPORTED_TEXT_ENCODINGS = [TEXT_ENCODING_UTF8].freeze
-
     MOBI_MAGIC = 'MOBI'.b
     EXTH_MAGIC = 'EXTH'.b
 
@@ -194,8 +190,8 @@ module Dyck
           io.seek(skel_position, IO::SEEK_SET)
           part = io.read(skel_length)
 
-          if fragments_count > 0
-            raise ArgumentError, "File has fragments but no frag index" if frag.nil?
+          if fragments_count.positive?
+            raise ArgumentError, 'File has fragments but no frag index' if frag.nil?
 
             frag.entries[frag_offset..frag_offset + fragments_count - 1].each do |f|
               insert_pos = Integer(f.label, 10)
@@ -320,6 +316,8 @@ module Dyck
     # @param text_length [Integer]
     # @param text_record_count [Integer]
     # @param fdst_index [Integer]
+    # @param fcis_index [Integer]
+    # @param flis_index [Integer]
     # @param image_index [Integer]
     # @param exth_records [Array<Dyck::ExthRecord>]
     # @param flow [Array<String>]
@@ -330,6 +328,8 @@ module Dyck
       text_length,
       text_record_count,
       fdst_index,
+      fcis_index,
+      flis_index,
       image_index,
       exth_records,
       full_name,
@@ -348,6 +348,8 @@ module Dyck
         io,
         fdst_index,
         flow.size,
+        fcis_index,
+        flis_index,
         image_index,
         exth_buf.size,
         full_name,
@@ -389,6 +391,8 @@ module Dyck
     # @param io [IO, StringIO]
     # @param fdst_index [Integer]
     # @param fdst_section_count [Integer]
+    # @param fcis_index [Integer]
+    # @param flis_index [Integer]
     # @param image_index [Integer]
     # @param skel_index [Integer]
     # @return [void]
@@ -397,28 +401,48 @@ module Dyck
       io,
       fdst_index,
       fdst_section_count,
+      fcis_index,
+      flis_index,
       image_index,
       exth_size,
       full_name,
       skel_index
     )
-      header_length = 264
+      header_size = 264
       uid = 0
-      io.write([MOBI_MAGIC, header_length, @mobi_type, @text_encoding, uid, version]
-                   .concat([MOBI_NOTSET] * 11)
-                   .concat([16 + header_length + exth_size, full_name.size])
-                   .concat([MOBI_NOTSET] * 3)
-                   .concat([version, image_index])
-                   .concat([MOBI_NOTSET] * 4)
-                   .concat([0x40]) # EXTH flags
-                   .concat([MOBI_NOTSET] * 15)
-                   .concat([fdst_index || 0, fdst_section_count])
-                   .concat([MOBI_NOTSET] * 10)
-                   .concat([0])
-                   .concat([MOBI_NOTSET] * 1)
-                   .concat([MOBI_NOTSET, skel_index])
-                   .concat([MOBI_NOTSET] * 6)
-                   .pack(%(A#{MOBI_MAGIC.bytesize}N*)))
+      header_data = [MOBI_MAGIC, header_size, @mobi_type, @text_encoding, uid, version]
+                    .append(MOBI_NOTSET) # orth index
+                    .append(MOBI_NOTSET) # infl index
+                    .append(MOBI_NOTSET) # names index
+                    .append(MOBI_NOTSET) # keys index
+                    .concat([MOBI_NOTSET] * 6) # unknown indexes
+                    .append(MOBI_NOTSET) # first record number (starting with 0) that's not the book's text
+                    .concat([16 + header_size + exth_size, full_name.size])
+                    .concat([0] * 3)
+                    .concat([version, image_index])
+                    .concat([0] * 4)
+                    .concat([0x40]) # EXTH flags
+                    .concat([0] * 4)
+                    .append(MOBI_NOTSET) # unknown index
+                    .append(MOBI_NOTSET) # drm index
+                    .concat([0] * 9)
+                    .concat([fdst_index, fdst_section_count, fcis_index])
+                    .append(1) # FCIS record count
+                    .append(flis_index)
+                    .append(1) # FLIS record count
+                    .concat([0] * 2)
+                    .append(MOBI_NOTSET) # srcs index
+                    .concat([0] * 4)
+                    .append(MOBI_NOTSET) # NCX index
+                    .append(MOBI_NOTSET) # FRAG index
+                    .append(skel_index)
+                    .append(MOBI_NOTSET) # DATP index
+                    .append(MOBI_NOTSET) # Guide index
+                    .concat([MOBI_NOTSET, 0, MOBI_NOTSET, 0]) # unknown
+                    .pack(%(A#{MOBI_MAGIC.bytesize}N*))
+      raise %(Internal error: #{header_size} != #{header_data.size}) if header_size != header_data.size
+
+      io.write(header_data)
     end
 
     # @param io [IO, StringIO]
@@ -686,12 +710,21 @@ module Dyck
         skel_index = palmdb.records.size - kf8_boundary
         palmdb.records.concat(skel.write)
 
+        fcis_index = palmdb.records.size - kf8_boundary
+        palmdb.records << write_fcis(kf8_text_length)
+
+        flis_index = palmdb.records.size - kf8_boundary
+        palmdb.records << write_flis
+        palmdb.records << (_eof_record = PalmDBRecord.new(content: "\xe9\x8e\r\n".b))
+
         @kf8.write(
           8,
           kf8_header,
           kf8_text_length,
           kf8_content_chunks.size,
           fdst_index,
+          fcis_index,
+          flis_index,
           image_index,
           exth_records,
           @title,
@@ -707,7 +740,9 @@ module Dyck
         mobi6_header,
         mobi6_text_length,
         mobi6_content_chunks.size,
-        0,
+        MOBI_NOTSET,
+        MOBI_NOTSET,
+        MOBI_NOTSET,
         image_index,
         exth_records,
         @title,
@@ -718,6 +753,19 @@ module Dyck
     end
 
     private
+
+    def write_fcis(text_length)
+      fcis = "FCIS\x00\x00\x00\x14\x00\x00\x00\x10\x00\x00\x00\x02\x00\x00\x00\x00".b
+      fcis += [text_length].pack('N')
+      fcis += "\x00\x00\x00\x00\x00\x00\x00\x28\x00\x00\x00\x00\x00\x00\x00".b
+      fcis += "\x28\x00\x00\x00\x08\x00\x01\x00\x01\x00\x00\x00\x00".b
+      PalmDBRecord.new(content: fcis)
+    end
+
+    def write_flis
+      flis = "FLIS\0\0\0\x08\0\x41\0\0\0\0\0\0\xff\xff\xff\xff\0\x01\0\x03\0\0\0\x03\0\0\0\x01".b + "\xff".b * 4
+      PalmDBRecord.new(content: flis)
+    end
 
     # @param records [Array<Dyck::PalmDBRecord>]
     # @return [Integer]

@@ -3,6 +3,10 @@
 module Dyck # rubocop:disable Style/Documentation
   MOBI_NOTSET = 0xffffffff
 
+  TEXT_ENCODING_CP1252 = 1252
+  TEXT_ENCODING_UTF8 = 65_001
+  SUPPORTED_TEXT_ENCODINGS = [TEXT_ENCODING_UTF8].freeze
+
   # Assumes v is 32-bit long
   # @param value [Integer]
   # @return [Integer]

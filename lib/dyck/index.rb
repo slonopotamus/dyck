@@ -85,7 +85,7 @@ module Dyck
     class << self
       # @param records [Array<Dyck::PalmDBRecord>]
       # @param name [String]
-      # @return [Index, nil]
+      # @return [Index]
       def read(records, name) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
         result = Index.new(name)
 
@@ -204,8 +204,34 @@ module Dyck
       end
     end
 
+    # @param num_records [Integer]
+    # @param idxt_offset [Integer]
+    def indx_header(num_records, idxt_offset) # rubocop:disable Metrics/MethodLength
+      tagx_offset = INDX_HEADER_LENGTH
+      header = [
+        INDX_MAGIC,
+        INDX_HEADER_LENGTH,
+        0,
+        0,
+        2,
+        idxt_offset,
+        num_records,
+        Dyck::TEXT_ENCODING_UTF8,
+        0,
+        0, # total entries
+        MOBI_NOTSET, # ordt_offset
+        MOBI_NOTSET, # ligt_offset
+        0 # num_of_cncx
+      ] + [0] * 32 + [tagx_offset] + [0] * 2
+      result = header.pack(INDX_HEADER)
+      raise 'Wrong index size' unless result.size == INDX_HEADER_LENGTH
+
+      result
+    end
+
     # @return [Array<Dyck::PalmDBRecord>]
     def write # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+      # TODO: support splitting index data into multiple records
       records = [record = PalmDBRecord.new]
       header = PalmDBRecord.new
 
@@ -242,26 +268,25 @@ module Dyck
       end
       idxt_offset = INDX_HEADER_LENGTH + entries_data.string.bytesize
 
-      record.content = ([INDX_MAGIC, INDX_HEADER_LENGTH, 0, 0, 0, idxt_offset,
-                         @entries.size] + [0] * 41).pack(INDX_HEADER)
-      raise 'Wrong index size' unless record.content.size == INDX_HEADER_LENGTH
-
+      record.content = indx_header(@entries.size, idxt_offset)
       record.content += entries_data.string
       record.content += [IDXT_MAGIC].pack(IDXT_HEADER)
       record.content += entries_offsets.pack('n*')
 
       tagx_record_length = 12 + tags.size * 4
 
-      tagx_offset = INDX_HEADER_LENGTH
-      header.content = ([INDX_MAGIC, INDX_HEADER_LENGTH, 0, 0, 0, 0,
-                         records.size] + [0] * 38 + [tagx_offset] + [0] * 2).pack(INDX_HEADER)
-      raise 'Wrong index size' unless header.content.size == INDX_HEADER_LENGTH
-
+      geometry_offset = INDX_HEADER_LENGTH + tagx_record_length
+      geometry_length = 3 * 2
+      header_idxt_offset = geometry_offset + geometry_length
+      header.content = indx_header(records.size, header_idxt_offset)
       header.content += [TAGX_MAGIC, tagx_record_length, tagx_control_byte_count].pack(TAGX_HEADER)
       tags.each do |tagx|
         tagx_data = tagx.nil? ? [0, 0, 0, 1] : [tagx.tag, tagx.values_count, tagx.bitmask << tagx.shift, 0]
         header.content += tagx_data.pack('C*')
       end
+      header.content += [4, 0, @entries.size].pack('n*')
+      header.content += [IDXT_MAGIC].pack(IDXT_HEADER)
+      header.content += [geometry_offset].pack('n')
 
       [header] + records
     end

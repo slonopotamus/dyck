@@ -5,7 +5,25 @@ require 'time'
 
 RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
   it 'is not nil' do
-    expect(subject).not_to be_nil
+    mobi = Dyck::Mobi.new
+
+    # Fill file metadata
+    mobi.title = 'Moby Dick'
+    mobi.publishing_date = Time.parse('October 18, 1851')
+    mobi.author = 'Herman Melville'
+    mobi.subjects = %w[whale sea]
+    mobi.description = "The book is the sailor Ishmael's narrative of the obsessive quest of Ahab," \
+  ' captain of the whaling ship Pequod, for revenge on Moby Dick, the giant white sperm whale ' \
+  "that on the ship's previous voyage bit off Ahab's leg at the knee."
+
+    # And/or, add KF8 data
+    mobi.kf8 = Dyck::MobiData.new
+    mobi.kf8.parts << '<html><body>Book text in KF8 format</body></html>'
+
+    # Write to file
+    File.open('moby-dick.mobi', 'wb') do |f|
+      mobi.write(f)
+    end
   end
 
   it 'has title' do
@@ -42,7 +60,7 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.mobi6.compression).to eq(Dyck::MobiData::NO_COMPRESSION)
     expect(subject.mobi6.encryption).to eq(Dyck::MobiData::NO_ENCRYPTION)
     expect(subject.mobi6.mobi_type).to eq(2)
-    expect(subject.mobi6.text_encoding).to eq(Dyck::MobiData::TEXT_ENCODING_UTF8)
+    expect(subject.mobi6.text_encoding).to eq(Dyck::TEXT_ENCODING_UTF8)
   end
 
   it 'has MOBI6 part' do
@@ -55,7 +73,7 @@ RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
     expect(subject.kf8.compression).to eq(Dyck::MobiData::NO_COMPRESSION)
     expect(subject.kf8.encryption).to eq(Dyck::MobiData::NO_ENCRYPTION)
     expect(subject.kf8.mobi_type).to eq(2)
-    expect(subject.kf8.text_encoding).to eq(Dyck::MobiData::TEXT_ENCODING_UTF8)
+    expect(subject.kf8.text_encoding).to eq(Dyck::TEXT_ENCODING_UTF8)
   end
 
   it 'has KF8 flow' do
