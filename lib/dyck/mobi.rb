@@ -570,6 +570,22 @@ module Dyck
         resources = image_index.nil? ? [] : read_resources(palmdb.records[image_index..-1])
 
         publishing_date = ExthRecord.find(ExthRecord::PUBLISHING_DATE, exth_records)&.data
+        if publishing_date.nil? then
+          publishing_timestamp = Time.now
+        else
+          begin
+            # Try the spec-compliant strict parse first.
+            publishing_timestamp = Time.iso8601(publishing_date)
+          rescue ArgumentError  # Fall back to fuzzy parse.
+            # Check for year on its own.
+            if publishing_date =~ /^\d\d\d\d$/ then
+              publishing_timestamp = Time.parse("#{publishing_date}-01-01")
+            else
+              publishing_timestamp = Time.parse(publishing_date)
+            end
+          end
+        end
+
         Mobi.new(
           mobi6: mobi6,
           kf8: kf8,
@@ -579,7 +595,7 @@ module Dyck
           publisher: ExthRecord.find(ExthRecord::PUBLISHER, exth_records)&.data || ''.b,
           description: ExthRecord.find(ExthRecord::DESCRIPTION, exth_records)&.data || ''.b,
           subjects: exth_records.select { |r| r.tag == ExthRecord::SUBJECT }.map(&:data),
-          publishing_date: publishing_date.nil? ? Time.now : Time.iso8601(publishing_date),
+          publishing_date: publishing_timestamp,
           copyright: ExthRecord.find(ExthRecord::RIGHTS, exth_records)&.data || ''.b
         )
       end
