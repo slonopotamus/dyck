@@ -3,6 +3,7 @@
 require 'dyck/index'
 require 'dyck/palmdb'
 require 'dyck/util'
+require 'stringio'
 require 'time'
 require 'zlib'
 
