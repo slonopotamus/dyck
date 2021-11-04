@@ -5,25 +5,7 @@ require 'time'
 
 RSpec.shared_examples 'sample Mobi' do # rubocop:disable Metrics/BlockLength
   it 'is not nil' do
-    mobi = Dyck::Mobi.new
-
-    # Fill file metadata
-    mobi.title = 'Moby Dick'
-    mobi.publishing_date = Time.parse('October 18, 1851')
-    mobi.author = 'Herman Melville'
-    mobi.subjects = %w[whale sea]
-    mobi.description = "The book is the sailor Ishmael's narrative of the obsessive quest of Ahab," \
-  ' captain of the whaling ship Pequod, for revenge on Moby Dick, the giant white sperm whale ' \
-  "that on the ship's previous voyage bit off Ahab's leg at the knee."
-
-    # And/or, add KF8 data
-    mobi.kf8 = Dyck::MobiData.new
-    mobi.kf8.parts << '<html><body>Book text in KF8 format</body></html>'
-
-    # Write to file
-    File.open('moby-dick.mobi', 'wb') do |f|
-      mobi.write(f)
-    end
+    expect(subject).not_to be_nil
   end
 
   it 'has title' do
