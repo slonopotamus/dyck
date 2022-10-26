@@ -19,7 +19,7 @@ Gem::Specification.new do |s|
   s.require_paths = ['lib']
 
   s.add_development_dependency 'rake', '~> 13.0.0'
-  s.add_development_dependency 'rspec', '~> 3.11.0'
+  s.add_development_dependency 'rspec', '~> 3.12.0'
   s.add_development_dependency 'rubocop', '~> 1.12.0'
   s.add_development_dependency 'rubocop-rake', '~> 0.5.0'
   s.add_development_dependency 'rubocop-rspec', '~> 2.2.0'
