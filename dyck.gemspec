@@ -10,7 +10,7 @@ Gem::Specification.new do |s|
   s.summary = 'Mobi parser/generator library'
   s.homepage = 'https://github.com/slonopotamus/dyck'
   s.license = 'MIT'
-  s.required_ruby_version = '>= 2.4.0'
+  s.required_ruby_version = '>= 2.5.0'
 
   s.files = `git ls-files`.split("\n").reject { |f| f.match(%r{^spec/}) }
   s.executables = `git ls-files -- bin/*`.split("\n").map do |f|
