@@ -8,7 +8,7 @@ Marat Radchenko <marat@slonopotamus.org>
 :uri-gem: https://rubygems.org/gems/{project-handle}
 
 image:https://img.shields.io/gem/v/{project-handle}.svg[Latest Release,link={uri-gem}]
-image:{uri-project}/workflows/CI/badge.svg?branch=master[Build Status,link={uri-ci}]
+image:{uri-project}/actions/workflows/ci.yml/badge.svg?branch=master[Build Status,link={uri-ci}]
 
 {project-name} is a Mobi parser/generator library written in Ruby.
 
